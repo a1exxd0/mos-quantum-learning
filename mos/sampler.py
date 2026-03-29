@@ -48,8 +48,6 @@ References:
 - Bernstein & Vazirani (1997) for the original QFS idea.
 """
 
-from __future__ import annotations
-
 import warnings
 from dataclasses import dataclass
 from typing import Optional
@@ -374,26 +372,26 @@ class QuantumFourierSampler:
         n = self.n
         counts: dict[str, int] = {}
 
-        # Build all circuits first (one per MoS copy)
-        circuits = []
+        # Run one circuit at a time, each with a fresh child seed drawn
+        # from self._rng.  This is necessary because StatevectorSampler
+        # produces deterministic outcomes for identical circuits within
+        # a single run() batch.  By giving each circuit its own sampler
+        # with a unique seed, duplicate circuits (common when phi is
+        # near-deterministic or n is small) get independent measurement
+        # draws.  Reproducibility is preserved: the child seeds are
+        # governed by self._rng, which is seeded at construction.
         for _ in range(shots):
             f = self.state.sample_f(rng=self._rng)
             qc = self.state.circuit_prepare_f(f)
             for q in range(n + 1):
                 qc.h(q)
             qc.measure_all()
-            circuits.append(qc)
 
-        # Execute all circuits in a single batch (1 shot each).
-        # This ensures the sampler's internal RNG advances across
-        # circuits, producing independent outcomes.
-        sampler = StatevectorSampler(seed=self._seed)
-        pubs = [(qc,) for qc in circuits]
-        job = sampler.run(pubs, shots=1)
-        results = job.result()
-
-        for pub_result in results:
-            meas = pub_result.data.meas
+            child_seed = int(self._rng.integers(0, 2**31))
+            sampler = StatevectorSampler(seed=child_seed)
+            job = sampler.run([qc], shots=1)
+            result = job.result()[0]
+            meas = result.data.meas
             for bitstring, cnt in meas.get_counts().items():
                 counts[bitstring] = counts.get(bitstring, 0) + cnt
 
