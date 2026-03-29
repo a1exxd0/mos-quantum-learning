@@ -1,4 +1,4 @@
-cs310-code
+Interactive Proofs for Verifying Quantum Learning
 ==========
 
 Implementation code for CS310 - Computer Science Project, in submission of a
@@ -13,3 +13,4 @@ and the interactive verification protocol from
    :caption: API Reference
 
    mos
+   sampler
