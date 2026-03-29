@@ -10,6 +10,7 @@ dependencies = [
     "numpy>=2.4.1",
     "polars>=1.37.1",
     "pylatexenc>=2.10",
+    "pytest>=9.0.2",
     "qiskit>=2.3.0",
     "qiskit-aer>=0.17.2",
     "qiskit-ibm-runtime>=0.45.0",

@@ -1,5 +1,5 @@
 """
-Mixture-of-Superpositions (MoS) State — Definition 8 of Caro et al.
+Mixture-of-Superpositions (MoS) State - Definition 8 of Caro et al.
 
 Represents the mixed quantum example state:
 
