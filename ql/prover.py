@@ -32,6 +32,7 @@ Two extraction strategies are provided:
 
 import numpy as np
 from typing import Optional, List, Tuple, Dict, NamedTuple
+from mos.mos_simulator import MoSSimulator
 from dataclasses import dataclass, field
 from numpy.random import Generator, default_rng
 
@@ -39,23 +40,25 @@ from numpy.random import Generator, default_rng
 @dataclass
 class HeavyCoefficient:
     """A Fourier coefficient identified as heavy by the prover."""
-    s: int                  # The frequency index s in {0,...,2^n - 1}
-    s_bits: str             # Binary representation of s
-    estimated_weight: float # Empirical estimate of |hat{tilde_phi}(s)|^2
-    count: int              # Raw count from post-selected measurements
-    total_postselected: int # Total post-selected shots (b=1)
+
+    s: int  # The frequency index s in {0,...,2^n - 1}
+    s_bits: str  # Binary representation of s
+    estimated_weight: float  # Empirical estimate of |hat{tilde_phi}(s)|^2
+    count: int  # Raw count from post-selected measurements
+    total_postselected: int  # Total post-selected shots (b=1)
 
 
 @dataclass
 class ProverResult:
     """Complete output from the prover's heavy coefficient extraction."""
+
     heavy_coefficients: List[HeavyCoefficient]
-    theta: float                    # Threshold used
-    n: int                          # Number of input bits
-    total_shots: int                # Total MoS copies consumed
-    total_postselected: int         # Shots where b=1
-    postselection_rate: float       # Fraction of shots with b=1
-    all_s_counts: Dict[int, int]    # Full count dictionary (for diagnostics)
+    theta: float  # Threshold used
+    n: int  # Number of input bits
+    total_shots: int  # Total MoS copies consumed
+    total_postselected: int  # Shots where b=1
+    postselection_rate: float  # Fraction of shots with b=1
+    all_s_counts: Dict[int, int]  # Full count dictionary (for diagnostics)
 
     @property
     def heavy_list(self) -> List[int]:
@@ -78,9 +81,10 @@ class ProverResult:
         ]
         if self.heavy_coefficients:
             lines.append(f"  {'s':>6} {'bits':>12} {'|φ̂(s)|²':>12} {'count':>8}")
-            lines.append(f"  {'-'*6} {'-'*12} {'-'*12} {'-'*8}")
-            for hc in sorted(self.heavy_coefficients,
-                             key=lambda h: h.estimated_weight, reverse=True):
+            lines.append(f"  {'-' * 6} {'-' * 12} {'-' * 12} {'-' * 8}")
+            for hc in sorted(
+                self.heavy_coefficients, key=lambda h: h.estimated_weight, reverse=True
+            ):
                 lines.append(
                     f"  {hc.s:>6} {hc.s_bits:>12} "
                     f"{hc.estimated_weight:>12.6f} {hc.count:>8}"
@@ -103,17 +107,14 @@ class MoSProver:
         Random seed for reproducibility.
     """
 
-    def __init__(self, simulator, seed: Optional[int] = None):
-        self.sim = simulator
-        self.n = simulator.n
-        self.dim_x = simulator.dim_x
-        self.rng = default_rng(seed)
+    def __init__(self, simulator: MoSSimulator, seed: Optional[int] = None):
+        self.sim: MoSSimulator = simulator
+        self.n: int = simulator.n
+        self.dim_x: int = simulator.dim_x
+        self.rng: Generator = default_rng(seed)
 
     def _run_fourier_sampling(
-        self,
-        num_copies: int,
-        mode: str = "statevector",
-        **kwargs
+        self, num_copies: int, mode: str = "statevector", **kwargs
     ) -> Tuple[Dict[int, int], int, int]:
         """
         Run the Hadamard measurement experiment and post-select on b=1.
@@ -139,20 +140,13 @@ class MoSProver:
         """
         # Run the Hadamard measurement experiment
         raw_counts = self.sim.sample_hadamard_measure(
-            shots=num_copies,
-            mode=mode,
-            rng=self.rng,
-            **kwargs
+            shots=num_copies, mode=mode, rng=self.rng, **kwargs
         )
 
         # Use the simulator's analysis to extract post-selected s-distribution
         analysis = self.sim.analyze_counts(raw_counts)
 
-        return (
-            analysis['s_counts'],
-            analysis['shots_last_1'],
-            analysis['total_shots']
-        )
+        return (analysis["s_counts"], analysis["shots_last_1"], analysis["total_shots"])
 
     def extract_heavy_coefficients_threshold(
         self,
@@ -160,7 +154,7 @@ class MoSProver:
         num_copies: int,
         mode: str = "statevector",
         confidence_boost: float = 1.0,
-        **kwargs
+        **kwargs,
     ) -> ProverResult:
         """
         Extract heavy Fourier coefficients by direct thresholding.
@@ -250,13 +244,15 @@ class MoSProver:
             estimated_weight = max(0.0, raw_prob - estimated_floor)
 
             if estimated_weight >= theta:
-                heavy.append(HeavyCoefficient(
-                    s=s,
-                    s_bits=format(s, f'0{self.n}b'),
-                    estimated_weight=estimated_weight,
-                    count=s_counts.get(s, 0),
-                    total_postselected=total_postselected,
-                ))
+                heavy.append(
+                    HeavyCoefficient(
+                        s=s,
+                        s_bits=format(s, f"0{self.n}b"),
+                        estimated_weight=estimated_weight,
+                        count=s_counts.get(s, 0),
+                        total_postselected=total_postselected,
+                    )
+                )
 
         postselection_rate = (
             total_postselected / actual_shots if actual_shots > 0 else 0.0
@@ -278,7 +274,7 @@ class MoSProver:
         num_copies_per_query: int = 1000,
         mode: str = "statevector",
         delta: float = 0.05,
-        **kwargs
+        **kwargs,
     ) -> ProverResult:
         """
         Extract heavy Fourier coefficients via Goldreich-Levin / Kushilevitz-
@@ -336,10 +332,7 @@ class MoSProver:
         samples_for_confidence = int(
             np.ceil(2 * np.log(2 * self.n / delta) / estimation_accuracy**2)
         )
-        total_copies = max(
-            num_copies_per_query * 4,
-            samples_for_confidence
-        )
+        total_copies = max(num_copies_per_query * 4, samples_for_confidence)
 
         # Generate the sample pool
         s_counts, total_postselected, actual_shots = self._run_fourier_sampling(
@@ -432,13 +425,15 @@ class MoSProver:
         heavy = []
         for s, weight in heavy_candidates:
             if weight >= theta:
-                heavy.append(HeavyCoefficient(
-                    s=s,
-                    s_bits=format(s, f'0{self.n}b'),
-                    estimated_weight=weight,
-                    count=s_counts.get(s, 0),
-                    total_postselected=total_postselected,
-                ))
+                heavy.append(
+                    HeavyCoefficient(
+                        s=s,
+                        s_bits=format(s, f"0{self.n}b"),
+                        estimated_weight=weight,
+                        count=s_counts.get(s, 0),
+                        total_postselected=total_postselected,
+                    )
+                )
 
         postselection_rate = (
             total_postselected / actual_shots if actual_shots > 0 else 0.0
@@ -460,7 +455,7 @@ class MoSProver:
         num_copies: int = 10000,
         method: str = "auto",
         mode: str = "statevector",
-        **kwargs
+        **kwargs,
     ) -> ProverResult:
         """
         Unified interface for heavy Fourier coefficient extraction.
@@ -488,17 +483,11 @@ class MoSProver:
 
         if method == "threshold":
             return self.extract_heavy_coefficients_threshold(
-                theta=theta,
-                num_copies=num_copies,
-                mode=mode,
-                **kwargs
+                theta=theta, num_copies=num_copies, mode=mode, **kwargs
             )
         elif method == "gl":
             return self.extract_heavy_coefficients_gl(
-                theta=theta,
-                num_copies_per_query=num_copies // 4,
-                mode=mode,
-                **kwargs
+                theta=theta, num_copies_per_query=num_copies // 4, mode=mode, **kwargs
             )
         else:
             raise ValueError(f"Unknown method: {method}")
@@ -521,7 +510,7 @@ class MoSProver:
         heavy = []
         for s in range(self.dim_x):
             fc = self.sim.fourier_coefficient(s)
-            weight = fc ** 2
+            weight = fc**2
             if weight >= theta:
                 heavy.append((s, weight))
         return sorted(heavy, key=lambda t: t[1], reverse=True)
