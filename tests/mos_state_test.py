@@ -760,18 +760,18 @@ class TestFourierAnalysis:
             if s != 7:
                 assert abs(spectrum[s]) < 1e-10
 
-    def test_parity_coefficient_value(self, parity_biased_state):
+    def test_parity_coefficient_value(self, parity_biased_state: MoSState):
         """hat{tilde_phi}(7) = -0.5 for our parity-biased phi."""
-        coeff = parity_biased_state.fourier_coefficient(7)
+        coeff = parity_biased_state.fourier_coefficient(7, effective=False)
         np.testing.assert_allclose(coeff, -0.5, atol=1e-10)
 
-    def test_zero_coefficient(self, parity_biased_state):
+    def test_zero_coefficient(self, parity_biased_state: MoSState):
         """All non-7 coefficients should be zero."""
         for s in [0, 1, 2, 3, 4, 5, 6]:
-            coeff = parity_biased_state.fourier_coefficient(s)
+            coeff = parity_biased_state.fourier_coefficient(s, effective=False)
             np.testing.assert_allclose(coeff, 0.0, atol=1e-10)
 
-    def test_multi_fourier_coefficients(self, multi_fourier_state):
+    def test_multi_fourier_coefficients(self, multi_fourier_state: MoSState):
         """Check specific coefficient values for the multi-Fourier state.
         tilde_phi = 1 - 2*phi:
           x=0: 1 - 2*0.8 = -0.6
@@ -787,11 +787,17 @@ class TestFourierAnalysis:
           = (-0.6 + 0.2 + 0.2 - 0.6)/4 = -0.8/4 = -0.2
         """
         s = multi_fourier_state
-        np.testing.assert_allclose(s.fourier_coefficient(0), 0.0, atol=1e-10)
-        np.testing.assert_allclose(s.fourier_coefficient(1), -0.4, atol=1e-10)
-        np.testing.assert_allclose(s.fourier_coefficient(2), -0.2, atol=1e-10)
+        np.testing.assert_allclose(
+            s.fourier_coefficient(0, effective=False), 0.0, atol=1e-10
+        )
+        np.testing.assert_allclose(
+            s.fourier_coefficient(1, effective=False), -0.4, atol=1e-10
+        )
+        np.testing.assert_allclose(
+            s.fourier_coefficient(2, effective=False), -0.2, atol=1e-10
+        )
 
-    def test_fourier_spectrum_shape(self, parity_biased_state):
+    def test_fourier_spectrum_shape(self, parity_biased_state: MoSState):
         spectrum = parity_biased_state.fourier_spectrum()
         assert spectrum.shape == (parity_biased_state.dim_x,)
 
@@ -799,7 +805,7 @@ class TestFourierAnalysis:
         """hat{tilde_phi}(0) = E[tilde_phi] = mean of tilde_phi."""
         phi = np.array([0.3, 0.7, 0.5, 0.5])
         state = MoSState(n=2, phi=phi)
-        coeff_0 = state.fourier_coefficient(0)
+        coeff_0 = state.fourier_coefficient(0, effective=False)
         expected = np.mean(1.0 - 2.0 * phi)
         np.testing.assert_allclose(coeff_0, expected, atol=1e-10)
 
@@ -812,11 +818,11 @@ class TestFourierAnalysis:
 class TestNoiseModel:
     """Test noise attenuation: hat{tilde_phi_eff}(s) = (1-2*eta) * hat{tilde_phi}(s)."""
 
-    def test_effective_coefficient_attenuation(self, noisy_state):
+    def test_effective_coefficient_attenuation(self, noisy_state: MoSState):
         """Lemma 6: noise attenuates Fourier coefficients by (1-2*eta)."""
         eta = noisy_state.noise_rate
-        clean_coeff = noisy_state.fourier_coefficient(7)
-        effective_coeff = noisy_state.fourier_coefficient_effective(7)
+        clean_coeff = noisy_state.fourier_coefficient(7, effective=False)
+        effective_coeff = noisy_state.fourier_coefficient(7, effective=True)
         np.testing.assert_allclose(effective_coeff, (1 - 2 * eta) * clean_coeff)
 
     def test_all_coefficients_attenuated(self):
@@ -825,15 +831,15 @@ class TestNoiseModel:
         eta = 0.15
         state = MoSState(n=2, phi=phi, noise_rate=eta)
         for s in range(4):
-            clean = state.fourier_coefficient(s)
-            effective = state.fourier_coefficient_effective(s)
+            clean = state.fourier_coefficient(s, effective=False)
+            effective = state.fourier_coefficient(s, effective=True)
             np.testing.assert_allclose(effective, (1 - 2 * eta) * clean, atol=1e-12)
 
-    def test_zero_noise_no_attenuation(self, parity_biased_state):
+    def test_zero_noise_no_attenuation(self, parity_biased_state: MoSState):
         """With eta=0, effective = clean."""
         for s in range(8):
-            clean = parity_biased_state.fourier_coefficient(s)
-            effective = parity_biased_state.fourier_coefficient_effective(s)
+            clean = parity_biased_state.fourier_coefficient(s, effective=False)
+            effective = parity_biased_state.fourier_coefficient(s, effective=True)
             np.testing.assert_allclose(effective, clean)
 
     def test_max_noise_kills_coefficients(self):
@@ -841,10 +847,10 @@ class TestNoiseModel:
         phi = np.array([0.8, 0.2, 0.6, 0.4])
         state = MoSState(n=2, phi=phi, noise_rate=0.5)
         for s in range(4):
-            effective = state.fourier_coefficient_effective(s)
+            effective = state.fourier_coefficient(s, effective=True)
             np.testing.assert_allclose(effective, 0.0, atol=1e-12)
 
-    def test_noisy_sampling_marginals(self, noisy_state):
+    def test_noisy_sampling_marginals(self, noisy_state: MoSState):
         """sample_f with noise should give E[f(x)] = phi_eff(x)."""
         rng = default_rng(789)
         num_samples = 10000
@@ -861,8 +867,8 @@ class TestNoiseModel:
         phi = np.array([0.9, 0.1, 0.7, 0.3])
         state = MoSState(n=2, phi=phi, noise_rate=eta)
         for s in range(4):
-            clean = state.fourier_coefficient(s)
-            effective = state.fourier_coefficient_effective(s)
+            clean = state.fourier_coefficient(s, effective=False)
+            effective = state.fourier_coefficient(s, effective=True)
             np.testing.assert_allclose(effective, (1 - 2 * eta) * clean, atol=1e-12)
 
 
@@ -906,8 +912,12 @@ class TestSpecialCases:
 
         # hat{tilde_phi}(0) = mean = (0.4 + (-0.6))/2 = -0.1
         # hat{tilde_phi}(1) = mean(tilde_phi * chi_1) = (0.4*1 + (-0.6)*(-1))/2 = 0.5
-        np.testing.assert_allclose(state.fourier_coefficient(0), -0.1, atol=1e-10)
-        np.testing.assert_allclose(state.fourier_coefficient(1), 0.5, atol=1e-10)
+        np.testing.assert_allclose(
+            state.fourier_coefficient(0, effective=False), -0.1, atol=1e-10
+        )
+        np.testing.assert_allclose(
+            state.fourier_coefficient(1, effective=False), 0.5, atol=1e-10
+        )
 
         # Parseval: (-0.1)^2 + 0.5^2 = 0.01 + 0.25 = 0.26
         # E[tilde_phi^2] = (0.16 + 0.36)/2 = 0.26

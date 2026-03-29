@@ -9,20 +9,46 @@ Represents the mixed quantum example state:
     \bigl[|\psi_{U_n, f}\rangle\langle\psi_{U_n, f}|\bigr]
 
 where :math:`F_D` is the distribution over Boolean functions induced by
-independently sampling :math:`f(x) \sim \text{Bernoulli}(\phi(x))` for each
-:math:`x \in \{0,1\}^n`, and
+independently sampling :math:`f(x) \sim \text{Bernoulli}(\phi_{\text{eff}}(x))`
+for each :math:`x \in \{0,1\}^n`, and
 
 .. math::
 
     |\psi_{U_n, f}\rangle = \frac{1}{\sqrt{2^n}} \sum_x |x, f(x)\rangle
 
+**Noise model (Definition 5(iii)).**  When ``noise_rate`` :math:`\eta > 0`,
+each label is independently flipped with probability :math:`\eta` before
+state preparation.  The *effective* conditional label probability becomes
+
+.. math::
+
+    \phi_{\text{eff}}(x) = (1 - 2\eta)\,\phi(x) + \eta
+
+and the effective :math:`\{-1,1\}`-valued label expectation is
+
+.. math::
+
+    \tilde\phi_{\text{eff}}(x) = (1 - 2\eta)\,\tilde\phi(x).
+
+The MoS state :math:`\rho_D` is constructed from :math:`\phi_{\text{eff}}`,
+so computational-basis measurement yields samples from the *noisy*
+distribution (Lemma 1), and Quantum Fourier Sampling (Theorem 5)
+produces outcomes governed by the *effective* Fourier coefficients
+:math:`\hat{\tilde\phi}_{\text{eff}}(s) = (1 - 2\eta)\,\hat{\tilde\phi}(s)`.
+
+All Fourier-analytic methods accept an ``effective`` flag (default
+``True``) that controls whether the returned quantities incorporate the
+noise factor :math:`(1 - 2\eta)`.  Set ``effective=False`` to obtain the
+noiseless ground-truth coefficients of :math:`\tilde\phi`.
+
 This class handles ONLY state-level concerns:
 
-- Storing the distribution :math:`D = (U_n, \phi)`
+- Storing the distribution :math:`D = (U_n, \phi)` and its noise model
 - Sampling :math:`f \sim F_D`
 - Preparing :math:`|\psi_f\rangle` as a Statevector or QuantumCircuit
 - Approximating :math:`\rho_D` via Monte Carlo
 - Recovering classical samples via computational basis measurement (Lemma 1)
+- Exact Fourier analysis of :math:`\tilde\phi` (noiseless or effective)
 
 It does NOT handle Hadamard measurement, post-selection, Fourier sampling,
 heavy coefficient extraction, or anything verification-related.
@@ -58,8 +84,11 @@ class MoSState:
     noise_rate : float
         Label-flip noise rate :math:`\eta \in [0, 0.5]`. When :math:`\eta > 0`,
         each label is independently flipped with probability :math:`\eta` before
-        state preparation. This corresponds to the MoS noisy functional setting,
-        Definition 5(iii).
+        state preparation.  This corresponds to the MoS noisy functional setting,
+        Definition 5(iii).  The MoS state is constructed from the *effective*
+        label probabilities :math:`\phi_{\text{eff}}(x) = (1-2\eta)\phi(x)+\eta`,
+        so all quantum operations (state preparation, QFS, classical sampling)
+        see the noisy distribution.
     seed : int, optional
         Random seed for reproducibility.
     """
@@ -101,6 +130,9 @@ class MoSState:
         eta = self.noise_rate
         self._phi_effective: np.ndarray = (1 - 2 * eta) * self._phi + eta
 
+        # Precompute noise damping factor for Fourier coefficients
+        self._noise_damping: float = 1.0 - 2.0 * eta
+
     # ------------------------------------------------------------------
     # Properties: access phi in both {0,1} and {-1,1} conventions
     # ------------------------------------------------------------------
@@ -117,12 +149,12 @@ class MoSState:
 
     @property
     def phi_effective(self) -> np.ndarray:
-        r"""Effective phi after noise. :math:`(1 - 2\eta)\phi(x) + \eta`."""
+        r"""Effective phi after noise: :math:`(1 - 2\eta)\phi(x) + \eta`."""
         return self._phi_effective
 
     @property
     def tilde_phi_effective(self) -> np.ndarray:
-        r"""Effective tilde_phi after noise. :math:`(1 - 2\eta) \tilde\phi(x)`."""
+        r"""Effective tilde_phi after noise: :math:`(1 - 2\eta) \tilde\phi(x)`."""
         return 1.0 - 2.0 * self._phi_effective
 
     # ------------------------------------------------------------------
@@ -135,8 +167,10 @@ class MoSState:
 
         For each :math:`x \in \{0,1\}^n`, independently sample
         :math:`f(x) \sim \text{Bernoulli}(\phi_{\text{eff}}(x))`.
+
         When ``noise_rate > 0``, :math:`\phi_{\text{eff}}` incorporates
-        the label-flip noise.
+        the label-flip noise, so the sampled :math:`f` is drawn from
+        the noisy MoS distribution.
 
         Parameters
         ----------
@@ -201,6 +235,9 @@ class MoSState:
         For each x where f(x) = 1, applies a multi-controlled X gate on the
         label qubit, controlled on the input register being :math:`|x\rangle`.
 
+        Note: This constructs up to :math:`2^n` multi-controlled gates and is
+        intended for simulation only (impractical for n > ~10).
+
         Parameters
         ----------
         f : np.ndarray
@@ -216,6 +253,8 @@ class MoSState:
 
         for x in range(self.dim_x):
             if f[x] == 1:
+                # ctrl_state is big-endian: bit string specifies which
+                # computational basis state |x> activates the gate.
                 ctrl_state = format(x, f"0{self.n}b")
                 if self.n == 1:
                     # Single-controlled X
@@ -309,6 +348,9 @@ class MoSState:
             \rho_D \approx \frac{1}{M}
             \sum_{m=1}^{M} |\psi_{f_m}\rangle\langle\psi_{f_m}|
 
+        The functions :math:`f_m` are sampled using :math:`\phi_{\text{eff}}`,
+        so the resulting density matrix incorporates any label-flip noise.
+
         Parameters
         ----------
         num_samples : int
@@ -343,18 +385,15 @@ class MoSState:
         rng: Optional[Generator] = None,
     ) -> Tuple[int, int]:
         r"""
-        Draw a classical sample :math:`(x, y) \sim D` by measuring
+        Draw a classical sample :math:`(x, y)` by measuring
         :math:`\rho_D` in the computational basis.
 
-        By Lemma 1, this is equivalent to drawing :math:`(x, y) \sim D`
-        directly:
+        By Lemma 1, this is equivalent to sampling from the distribution
+        :math:`D` encoded by the MoS state.  When ``noise_rate > 0``, the
+        sampled labels reflect the noisy distribution (i.e. :math:`y` is
+        drawn from :math:`\phi_{\text{eff}}(x)`).
 
-        1. Sample :math:`f \sim F_D`
-        2. Prepare :math:`|\psi_{U_n, f}\rangle`
-        3. Measure in computational basis — yields :math:`(x, f(x))` with
-           :math:`x \sim U_n`
-
-        Equivalently (and more efficiently), we can just sample
+        Equivalently (and more efficiently), we sample
         :math:`x \sim U_n` and :math:`y \sim \text{Bernoulli}(\phi_{\text{eff}}(x))`
         directly.
 
@@ -382,8 +421,11 @@ class MoSState:
         num_samples: int,
         rng: Optional[Generator] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Draw a batch of classical samples :math:`(x_i, y_i) \\sim D`.
+        r"""
+        Draw a batch of classical samples :math:`(x_i, y_i)`.
+
+        Labels are drawn from :math:`\phi_{\text{eff}}` (see
+        :meth:`sample_classical`).
 
         Parameters
         ----------
@@ -407,12 +449,12 @@ class MoSState:
         return xs, ys
 
     # ------------------------------------------------------------------
-    # Fourier analysis (for validation / ground truth)
+    # Fourier analysis
     # ------------------------------------------------------------------
 
-    def fourier_coefficient(self, s: int) -> float:
+    def fourier_coefficient(self, s: int, *, effective: bool = True) -> float:
         r"""
-        Compute the exact Fourier coefficient :math:`\hat{\tilde\phi}(s)`.
+        Compute the Fourier coefficient :math:`\hat{\tilde\phi}(s)`.
 
         .. math::
 
@@ -420,73 +462,139 @@ class MoSState:
             = \mathbb{E}_{x \sim U_n}[\tilde\phi(x) \cdot \chi_s(x)]
 
         where :math:`\chi_s(x) = (-1)^{s \cdot x}` and
-        :math:`\tilde\phi = 1 - 2\phi` (noiseless).
+        :math:`\tilde\phi = 1 - 2\phi`.
 
         Parameters
         ----------
         s : int
             Frequency index in {0, ..., 2^n - 1}.
+        effective : bool
+            If True (default), return the noise-adjusted coefficient
+            :math:`\hat{\tilde\phi}_{\text{eff}}(s) = (1-2\eta)\hat{\tilde\phi}(s)`,
+            which governs the actual QFS sampling distribution (Theorem 5 /
+            Lemma 6).  If False, return the noiseless coefficient.
 
         Returns
         -------
         coeff : float
-            The Fourier coefficient :math:`\hat{\tilde\phi}(s)`.
+            The Fourier coefficient.
         """
-        tphi = self.tilde_phi
+        tphi = self.tilde_phi  # always compute from noiseless
         # Compute (-1)^{popcount(s & x)} for all x
         parities = np.array([bin(s & x).count("1") % 2 for x in range(self.dim_x)])
         chi_s = 1.0 - 2.0 * parities  # (-1)^{s·x}
-        return float(np.mean(tphi * chi_s))
+        coeff = float(np.mean(tphi * chi_s))
+        if effective:
+            coeff *= self._noise_damping
+        return coeff
 
-    def fourier_coefficient_effective(self, s: int) -> float:
+    def fourier_spectrum(self, *, effective: bool = True) -> np.ndarray:
         r"""
-        Compute :math:`\hat{\tilde\phi}_{\text{eff}}(s)
-        = (1 - 2\eta) \hat{\tilde\phi}(s)`.
-
-        This is the Fourier coefficient of the noise-adjusted
-        :math:`\tilde\phi`, which governs the actual sampling distribution
-        from Theorem 5 when ``noise_rate > 0``.
+        Compute the full Fourier spectrum for all s.
 
         Parameters
         ----------
-        s : int
-            Frequency index in {0, ..., 2^n - 1}.
-
-        Returns
-        -------
-        coeff : float
-            The effective Fourier coefficient.
-        """
-        return (1.0 - 2.0 * self.noise_rate) * self.fourier_coefficient(s)
-
-    def fourier_spectrum(self) -> np.ndarray:
-        r"""
-        Compute the full Fourier spectrum
-        :math:`\{\hat{\tilde\phi}(s)\}` for all s.
+        effective : bool
+            If True (default), return the noise-adjusted spectrum
+            :math:`\{\hat{\tilde\phi}_{\text{eff}}(s)\}_s`.
+            If False, return the noiseless spectrum
+            :math:`\{\hat{\tilde\phi}(s)\}_s`.
 
         Returns
         -------
         spectrum : np.ndarray of shape (2^n,)
-            ``spectrum[s]`` = :math:`\hat{\tilde\phi}(s)`.
+            ``spectrum[s]`` is the Fourier coefficient at frequency s.
         """
-        return np.array([self.fourier_coefficient(s) for s in range(self.dim_x)])
+        # Compute noiseless spectrum first (avoids repeated damping)
+        tphi = self.tilde_phi
+        spectrum = np.empty(self.dim_x, dtype=np.float64)
+        for s in range(self.dim_x):
+            parities = np.array([bin(s & x).count("1") % 2 for x in range(self.dim_x)])
+            chi_s = 1.0 - 2.0 * parities
+            spectrum[s] = float(np.mean(tphi * chi_s))
+        if effective:
+            spectrum *= self._noise_damping
+        return spectrum
 
-    def parseval_check(self) -> Tuple[float, float]:
+    def parseval_check(self, *, effective: bool = True) -> Tuple[float, float]:
         r"""
         Verify Parseval's identity:
         :math:`\sum_s \hat{\tilde\phi}(s)^2 = \mathbb{E}[\tilde\phi(x)^2]`.
 
+        When ``effective=True``, both sides are computed with the noise-adjusted
+        :math:`\tilde\phi_{\text{eff}}`, so the identity remains valid.
+
+        Parameters
+        ----------
+        effective : bool
+            If True (default), check Parseval for the effective (noise-adjusted)
+            spectrum and :math:`\tilde\phi_{\text{eff}}`.
+            If False, check for the noiseless quantities.
+
         Returns
         -------
         fourier_sum : float
-            :math:`\sum_s \hat{\tilde\phi}(s)^2`
+            :math:`\sum_s \hat{\tilde\phi}(s)^2` (or effective variant).
         expected_sq : float
-            :math:`\mathbb{E}_{x \sim U_n}[\tilde\phi(x)^2]`
+            :math:`\mathbb{E}_{x \sim U_n}[\tilde\phi(x)^2]` (or effective variant).
         """
-        spectrum = self.fourier_spectrum()
+        spectrum = self.fourier_spectrum(effective=effective)
         fourier_sum = float(np.sum(spectrum**2))
-        expected_sq = float(np.mean(self.tilde_phi**2))
+        if effective:
+            expected_sq = float(np.mean(self.tilde_phi_effective**2))
+        else:
+            expected_sq = float(np.mean(self.tilde_phi**2))
         return fourier_sum, expected_sq
+
+    # ------------------------------------------------------------------
+    # QFS sampling distribution (Theorem 5)
+    # ------------------------------------------------------------------
+
+    def qfs_probability(self, s: int) -> float:
+        r"""
+        Probability of observing frequency :math:`s` from Quantum Fourier
+        Sampling, conditioned on the last qubit being 1 (Theorem 5).
+
+        .. math::
+
+            \Pr[s \mid b{=}1] = \frac{1}{2^n}
+            \bigl(1 - \mathbb{E}_{x}[\tilde\phi_{\text{eff}}(x)^2]\bigr)
+            + \hat{\tilde\phi}_{\text{eff}}(s)^2
+
+        This always uses the effective (noise-adjusted) coefficients,
+        since the QFS circuit acts on the physical MoS state.
+
+        Parameters
+        ----------
+        s : int
+            Frequency index in {0, ..., 2^n - 1}.
+
+        Returns
+        -------
+        prob : float
+            Conditional probability of observing s.
+        """
+        tphi_eff = self.tilde_phi_effective
+        E_sq = float(np.mean(tphi_eff**2))
+        coeff = self.fourier_coefficient(s, effective=True)
+        return (1.0 - E_sq) / self.dim_x + coeff**2
+
+    def qfs_distribution(self) -> np.ndarray:
+        r"""
+        Full QFS conditional distribution over :math:`\{0,1\}^n`,
+        conditioned on the last qubit being 1 (Theorem 5).
+
+        Always uses effective (noise-adjusted) coefficients.
+
+        Returns
+        -------
+        dist : np.ndarray of shape (2^n,)
+            ``dist[s]`` is the conditional probability of observing s.
+        """
+        spectrum_eff = self.fourier_spectrum(effective=True)
+        tphi_eff = self.tilde_phi_effective
+        E_sq = float(np.mean(tphi_eff**2))
+        return (1.0 - E_sq) / self.dim_x + spectrum_eff**2
 
     # ------------------------------------------------------------------
     # String representation
@@ -496,13 +604,23 @@ class MoSState:
         noise_str = f", noise_rate={self.noise_rate}" if self.noise_rate > 0 else ""
         return f"MoSState(n={self.n}{noise_str})"
 
-    def summary(self) -> str:
-        """Human-readable summary of the MoS state."""
-        tphi = self.tilde_phi
-        fourier_sum, expected_sq = self.parseval_check()
+    def summary(self, *, effective: bool = True) -> str:
+        """
+        Human-readable summary of the MoS state.
+
+        Parameters
+        ----------
+        effective : bool
+            If True (default), report the noise-adjusted Fourier spectrum
+            that governs actual QFS outcomes.  If False, report noiseless
+            ground-truth coefficients.
+        """
+        label = "effective" if effective else "noiseless"
+        tphi = self.tilde_phi_effective if effective else self.tilde_phi
+        fourier_sum, expected_sq = self.parseval_check(effective=effective)
 
         lines = [
-            "MoS State (Definition 8)",
+            f"MoS State (Definition 8) — Fourier analysis: {label}",
             f"  n = {self.n}, dim = 2^n = {self.dim_x}",
             f"  noise_rate = {self.noise_rate}",
             f"  E[tilde_phi^2] = {expected_sq:.6f}",
@@ -511,9 +629,12 @@ class MoSState:
             f"  tilde_phi range: [{tphi.min():.4f}, {tphi.max():.4f}]",
         ]
 
+        if effective and self.noise_rate > 0:
+            lines.append(f"  noise damping (1 - 2η) = {self._noise_damping:.6f}")
+
         # Show nonzero Fourier coefficients if manageable
         if self.dim_x <= 64:
-            spectrum = self.fourier_spectrum()
+            spectrum = self.fourier_spectrum(effective=effective)
             nonzero = [
                 (s, spectrum[s]) for s in range(self.dim_x) if abs(spectrum[s]) > 1e-10
             ]
