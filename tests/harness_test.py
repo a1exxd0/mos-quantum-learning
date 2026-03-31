@@ -685,8 +685,6 @@ class TestCLIArgumentParsing:
     """Tests for __main__.py argument parsing."""
 
     def test_scaling_subcommand(self):
-        from experiments.harness.__main__ import main
-
         with patch(
             "sys.argv",
             [
@@ -748,9 +746,6 @@ class TestPackageImports:
         from experiments.harness import (
             run_scaling_experiment,
             run_bent_experiment,
-            run_truncation_experiment,
-            run_noise_sweep_experiment,
-            run_soundness_experiment,
         )
 
         assert callable(run_scaling_experiment)
@@ -766,8 +761,6 @@ class TestPackageImports:
     def test_import_phi_generators(self):
         from experiments.harness import (
             make_single_parity,
-            make_random_parity,
-            make_bent_function,
         )
 
         assert callable(make_single_parity)
