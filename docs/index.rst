@@ -15,3 +15,4 @@ and the interactive verification protocol from
    mos
    sampler
    prover
+   verifier
