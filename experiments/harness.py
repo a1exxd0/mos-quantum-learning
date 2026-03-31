@@ -1065,7 +1065,7 @@ def run_truncation_experiment(
     )
 
     # Print summary grid
-    print(f"\n  Accept rates (eps x verifier_samples):")
+    print("\n  Accept rates (eps x verifier_samples):")
     header = f"  {'eps':>5s}" + "".join(f"  {v:>5d}" for v in verifier_sample_range)
     print(header)
     for eps in epsilon_range:
