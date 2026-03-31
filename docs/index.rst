@@ -1,5 +1,5 @@
 Interactive Proofs for Verifying Quantum Learning
-==========
+=================================================
 
 Implementation code for CS310 - Computer Science Project, in submission of a
 BSc Computer Science degree at the University of Warwick.
@@ -14,3 +14,4 @@ and the interactive verification protocol from
 
    mos
    sampler
+   prover

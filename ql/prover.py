@@ -1,516 +1,621 @@
+r"""
+Honest Quantum Prover for Classical Verification of Quantum Learning.
+
+Implements the prover side of the interactive verification protocol from
+Caro et al. (ITCS 2024), Theorems 8, 10, 12, and 15.
+
+**Protocol overview** (prover's role):
+
+1. **Quantum Fourier Sampling** (Theorem 5):  Given copies of the MoS
+   state :math:`\rho_D`, apply :math:`H^{\otimes(n+1)}`, measure,
+   post-select on the label qubit being 1.  Each accepted shot yields
+   a sample :math:`s \in \{0,1\}^n` from the distribution
+
+   .. math::
+
+       \Pr[s \mid b{=}1]
+       = \frac{1 - \mathbb{E}[\tilde\phi_{\text{eff}}(x)^2]}{2^n}
+       + \hat{\tilde\phi}_{\text{eff}}(s)^2
+
+2. **Empirical spectrum approximation** (Corollary 5 via Lemma 3 / DKW):
+   From :math:`m` post-selected QFS samples, build the empirical
+   distribution :math:`\tilde{q}_m` over :math:`\{0,1\}^n`.  By
+   DKW, :math:`m = O(\log(1/\delta)/\varepsilon^4)` samples suffice
+   for :math:`\|\tilde{q}_m - q\|_\infty \leq \varepsilon^2/8` with
+   probability :math:`\geq 1 - \delta/2`.
+
+3. **Heavy coefficient extraction**: Identify the list
+
+   .. math::
+
+       L = \{s \in \{0,1\}^n : \tilde{q}_m(s,1) \geq \varepsilon^2/4\}
+
+   By the analysis in Corollary 5:
+
+   - If :math:`|\hat{\tilde\phi}(s)| \geq \varepsilon`, then :math:`s \in L`.
+   - If :math:`s \in L`, then :math:`|\hat{\tilde\phi}(s)| \geq \varepsilon/4`.
+
+4. **Fourier coefficient estimation** (optional): For each :math:`s \in L`,
+   estimate :math:`\hat{\tilde\phi}(s)` from classical samples of
+   :math:`D` (obtained by computational-basis measurement of
+   :math:`\rho_D`, per Lemma 1).
+
+5. **Send** :math:`L` (and optionally the estimates) to the verifier.
+
+The prover is *honest*: it follows the protocol faithfully.  Soundness
+holds against *any* prover — the verifier's checks ensure correctness
+regardless.
+
+**Copy complexity**: The prover uses :math:`O(\log(1/\delta\varepsilon^2)/\varepsilon^4)`
+copies of :math:`\rho_D` for QFS (Corollary 5), plus
+:math:`O(\log(1/\delta\varepsilon^2)/\varepsilon^4)` copies for classical
+estimation (via computational-basis measurement).
+
+References
+----------
+- Caro et al., "Classical Verification of Quantum Learning", ITCS 2024.
+  §5.1 (Corollary 5), §6 (Theorems 7–15).
+- Lemma 3 (DKW-based empirical approximation).
 """
-Prover-side heavy Fourier coefficient extraction for the MoS protocol.
 
-Implements the quantum prover's role from Caro et al. "Classical Verification
-of Quantum Learning" (2306.04843). The prover:
-
-  1. Receives copies of the MoS state rho = E_f[|psi_f><psi_f|]
-  2. Performs approximate quantum Fourier sampling via H^{n+1} + measure
-  3. Post-selects on the label qubit being 1
-  4. Collects frequency counts to identify heavy Fourier coefficients
-  5. Returns the list L of heavy coefficients to the classical verifier
-
-The key theoretical result (Theorem 5 / Corollary 5 of the paper) is that
-each MoS copy, upon Hadamard measurement and post-selection on b=1,
-produces a sample from a distribution close to:
-
-    Pr[s | b=1] ∝ hat{tilde_phi}(s)^2
-
-where tilde_phi = 1 - 2*phi. So repeatedly sampling and counting gives
-empirical estimates of |hat{tilde_phi}(s)|^2, from which we extract the
-heavy coefficients (those with |hat{tilde_phi}(s)|^2 >= theta).
-
-Two extraction strategies are provided:
-
-  - Direct thresholding: simple empirical frequency threshold on the
-    post-selected s-distribution. Works well for moderate n.
-
-  - Goldreich-Levin / Kushilevitz-Mansour style: iterative bisection
-    of the Fourier spectrum to find heavy coefficients in poly(n) time.
-    Essential for large n where 2^n enumeration is infeasible.
-"""
+from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
-from typing import Optional, List, Tuple, Dict, NamedTuple
-from mos.mos_simulator import MoSSimulator
-from dataclasses import dataclass, field
 from numpy.random import Generator, default_rng
 
-
-@dataclass
-class HeavyCoefficient:
-    """A Fourier coefficient identified as heavy by the prover."""
-
-    s: int  # The frequency index s in {0,...,2^n - 1}
-    s_bits: str  # Binary representation of s
-    estimated_weight: float  # Empirical estimate of |hat{tilde_phi}(s)|^2
-    count: int  # Raw count from post-selected measurements
-    total_postselected: int  # Total post-selected shots (b=1)
+from mos import MoSState
+from mos.sampler import QuantumFourierSampler, QFSResult
 
 
-@dataclass
-class ProverResult:
-    """Complete output from the prover's heavy coefficient extraction."""
+# ===================================================================
+# Result containers
+# ===================================================================
 
-    heavy_coefficients: List[HeavyCoefficient]
-    theta: float  # Threshold used
-    n: int  # Number of input bits
-    total_shots: int  # Total MoS copies consumed
-    total_postselected: int  # Shots where b=1
-    postselection_rate: float  # Fraction of shots with b=1
-    all_s_counts: Dict[int, int]  # Full count dictionary (for diagnostics)
+
+@dataclass(frozen=True)
+class SpectrumApproximation:
+    r"""
+    Succinct approximation to the Fourier spectrum (Corollary 5).
+
+    Attributes
+    ----------
+    entries : dict[int, float]
+        Sparse representation: maps frequency index :math:`s` to
+        the estimated squared-coefficient-related quantity
+        :math:`\tilde{q}_m(s)`.  Only entries above the extraction
+        threshold are stored.
+    threshold : float
+        The extraction threshold used (typically :math:`\varepsilon^2/4`).
+    n : int
+        Number of input bits.
+    num_qfs_samples : int
+        Number of post-selected QFS samples used to build the
+        empirical distribution.
+    total_qfs_shots : int
+        Total QFS shots consumed (before post-selection).
+    """
+
+    entries: dict[int, float]
+    threshold: float
+    n: int
+    num_qfs_samples: int
+    total_qfs_shots: int
+
+
+@dataclass(frozen=True)
+class ProverMessage:
+    r"""
+    The message sent from the honest prover to the classical verifier.
+
+    This implements the communication in Step 2 of the verification
+    protocols (Theorems 7–15): a list :math:`L` of candidate heavy
+    Fourier coefficient indices, optionally with estimated coefficient
+    values.
+
+    Attributes
+    ----------
+    L : list[int]
+        List of frequency indices :math:`s` identified as having
+        non-negligible Fourier weight.  Sorted by estimated weight
+        (descending).
+    estimates : dict[int, float]
+        For each :math:`s \in L`, an estimate of
+        :math:`\hat{\tilde\phi}(s)` obtained from classical samples.
+        Empty if ``estimate_coefficients=False`` was used.
+    n : int
+        Number of input bits.
+    epsilon : float
+        Accuracy parameter used by the prover.
+    theta : float
+        Fourier coefficient resolution threshold :math:`\vartheta`.
+    spectrum_approx : SpectrumApproximation
+        The intermediate Fourier spectrum approximation (for diagnostics).
+    qfs_result : QFSResult
+        Raw QFS result (for diagnostics / post-hoc analysis).
+    num_classical_samples : int
+        Number of classical samples used for coefficient estimation.
+    """
+
+    L: list[int]
+    estimates: dict[int, float]
+    n: int
+    epsilon: float
+    theta: float
+    spectrum_approx: SpectrumApproximation
+    qfs_result: QFSResult
+    num_classical_samples: int
 
     @property
-    def heavy_list(self) -> List[int]:
-        """The list L = {s1, ..., s_|L|} sent to the verifier."""
-        return [hc.s for hc in self.heavy_coefficients]
+    def list_size(self) -> int:
+        """Number of candidate heavy coefficients."""
+        return len(self.L)
 
     @property
-    def heavy_weights(self) -> Dict[int, float]:
-        """Estimated |hat{tilde_phi}(s)|^2 for each heavy s."""
-        return {hc.s: hc.estimated_weight for hc in self.heavy_coefficients}
+    def total_copies_used(self) -> int:
+        """Total MoS copies consumed (QFS + classical estimation)."""
+        return self.spectrum_approx.total_qfs_shots + self.num_classical_samples
 
     def summary(self) -> str:
+        """Human-readable summary of the prover's message."""
         lines = [
-            f"Prover Result (n={self.n})",
-            f"  Total MoS copies used: {self.total_shots}",
-            f"  Post-selected (b=1):   {self.total_postselected} "
-            f"({self.postselection_rate:.3f})",
-            f"  Threshold theta:       {self.theta:.6f}",
-            f"  Heavy coefficients:    {len(self.heavy_coefficients)}",
+            "Prover Message (§6 protocol)",
+            f"  n = {self.n}",
+            f"  epsilon = {self.epsilon:.4f}, theta = {self.theta:.4f}",
+            f"  |L| = {self.list_size}  (Parseval bound: {int(np.ceil(16 / self.theta**2))})",
+            f"  QFS copies used: {self.spectrum_approx.total_qfs_shots}",
+            f"  Post-selected QFS samples: {self.spectrum_approx.num_qfs_samples}",
+            f"  Classical samples for estimation: {self.num_classical_samples}",
+            f"  Total copies: {self.total_copies_used}",
         ]
-        if self.heavy_coefficients:
-            lines.append(f"  {'s':>6} {'bits':>12} {'|φ̂(s)|²':>12} {'count':>8}")
-            lines.append(f"  {'-' * 6} {'-' * 12} {'-' * 12} {'-' * 8}")
-            for hc in sorted(
-                self.heavy_coefficients, key=lambda h: h.estimated_weight, reverse=True
-            ):
-                lines.append(
-                    f"  {hc.s:>6} {hc.s_bits:>12} "
-                    f"{hc.estimated_weight:>12.6f} {hc.count:>8}"
-                )
+        if self.estimates:
+            lines.append("  Estimated coefficients:")
+            for s in self.L:
+                bits = format(s, f"0{self.n}b")
+                est = self.estimates.get(s, float("nan"))
+                lines.append(f"    s={s} ({bits}): est={est:+.6f}")
+        else:
+            lines.append("  Coefficient estimates: not computed")
+            lines.append(f"  L = {self.L}")
         return "\n".join(lines)
 
 
-class MoSProver:
-    """
-    Quantum prover for the MoS verification protocol.
+# ===================================================================
+# Prover
+# ===================================================================
 
-    Takes an MoSSimulator instance and performs the Hadamard measurement
-    experiment to extract heavy Fourier coefficients.
+
+class MoSProver:
+    r"""
+    Honest quantum prover for the verification protocol.
+
+    Follows the prover side of Theorems 8/10/12/15: uses MoS copies
+    for Quantum Fourier Sampling, builds a succinct Fourier spectrum
+    approximation, extracts heavy coefficients, and optionally
+    estimates their values from classical samples.
 
     Parameters
     ----------
-    simulator : MoSSimulator
-        The simulator instance (provides MoS state preparation and measurement).
+    mos_state : MoSState
+        The MoS state to work with.  The prover has quantum access
+        to copies of :math:`\rho_D`.
     seed : int, optional
         Random seed for reproducibility.
+
+    Notes
+    -----
+    The prover's computational complexity is dominated by QFS
+    (Section 5.1): :math:`O(n \cdot m)` single-qubit gates and
+    :math:`\tilde{O}(n \cdot m)` classical processing, where
+    :math:`m = O(\log(1/\delta)/\varepsilon^4)` is the number of
+    QFS copies.
     """
 
-    def __init__(self, simulator: MoSSimulator, seed: Optional[int] = None):
-        self.sim: MoSSimulator = simulator
-        self.n: int = simulator.n
-        self.dim_x: int = simulator.dim_x
-        self.rng: Generator = default_rng(seed)
-
-    def _run_fourier_sampling(
-        self, num_copies: int, mode: str = "statevector", **kwargs
-    ) -> Tuple[Dict[int, int], int, int]:
-        """
-        Run the Hadamard measurement experiment and post-select on b=1.
-
-        Each MoS copy is: sample f ~ F_D, prepare |psi_f>, apply H^{n+1},
-        measure. Keep only outcomes where the label qubit b=1.
-
-        Parameters
-        ----------
-        num_copies : int
-            Number of MoS copies (shots) to consume.
-        mode : str
-            Simulation mode passed to simulator.sample_hadamard_measure.
-
-        Returns
-        -------
-        s_counts : dict
-            Counts of each s value from post-selected measurements.
-        total_postselected : int
-            Number of shots where b=1.
-        total_shots : int
-            Total shots consumed.
-        """
-        # Run the Hadamard measurement experiment
-        raw_counts = self.sim.sample_hadamard_measure(
-            shots=num_copies, mode=mode, rng=self.rng, **kwargs
-        )
-
-        # Use the simulator's analysis to extract post-selected s-distribution
-        analysis = self.sim.analyze_counts(raw_counts)
-
-        return (analysis["s_counts"], analysis["shots_last_1"], analysis["total_shots"])
-
-    def extract_heavy_coefficients_threshold(
+    def __init__(
         self,
-        theta: float,
-        num_copies: int,
-        mode: str = "statevector",
-        confidence_boost: float = 1.0,
-        **kwargs,
-    ) -> ProverResult:
-        """
-        Extract heavy Fourier coefficients by direct thresholding.
+        mos_state: MoSState,
+        seed: Optional[int] = None,
+    ):
+        self.state = mos_state
+        self.n = mos_state.n
+        self._seed = seed
+        self._rng: Generator = default_rng(seed)
 
-        A coefficient hat{tilde_phi}(s) is declared "heavy" if its estimated
-        squared magnitude exceeds the threshold theta.
+    # ------------------------------------------------------------------
+    # Main protocol entry point
+    # ------------------------------------------------------------------
 
-        The theoretical distribution (Theorem 5) gives:
-            Pr[s | b=1] = (1 - E[tilde_phi^2]) / 2^n  +  hat{tilde_phi}(s)^2
-
-        The first term is a uniform "noise floor" of magnitude ~ 1/2^n.
-        We estimate |hat{tilde_phi}(s)|^2 from the empirical post-selected
-        distribution and threshold at theta.
-
-        This approach enumerates all 2^n possible s values, so it's only
-        practical for moderate n (say n <= 20).
-
-        Parameters
-        ----------
-        theta : float
-            Heaviness threshold. A coefficient s is reported if the
-            estimated |hat{tilde_phi}(s)|^2 >= theta.
-            Typical choice: theta = epsilon^2 for learning accuracy epsilon.
-        num_copies : int
-            Number of MoS copies to use.
-        mode : str
-            Simulation mode ("statevector", "circuit", or "batched").
-        confidence_boost : float
-            Multiplicative factor for num_copies to improve confidence.
-            The total shots used will be int(num_copies * confidence_boost).
-
-        Returns
-        -------
-        result : ProverResult
-            The extracted heavy coefficients and diagnostics.
-        """
-        total_shots = int(num_copies * confidence_boost)
-
-        s_counts, total_postselected, actual_shots = self._run_fourier_sampling(
-            total_shots, mode=mode, **kwargs
-        )
-
-        if total_postselected == 0:
-            return ProverResult(
-                heavy_coefficients=[],
-                theta=theta,
-                n=self.n,
-                total_shots=actual_shots,
-                total_postselected=0,
-                postselection_rate=0.0,
-                all_s_counts=s_counts,
-            )
-
-        # Estimate |hat{tilde_phi}(s)|^2 from empirical frequencies.
-        #
-        # From Theorem 5:
-        #   Pr[s | b=1] = base + hat{tilde_phi}(s)^2
-        # where base = (1 - E[tilde_phi^2]) / 2^n.
-        #
-        # We don't know E[tilde_phi^2] exactly, but we can either:
-        #   (a) Estimate it from the data
-        #   (b) Use the raw empirical Pr[s|b=1] as a proxy for
-        #       hat{tilde_phi}(s)^2 (conservative: includes the base term)
-        #
-        # Approach (a): The noise floor is base = (1 - E[tilde_phi^2]) / 2^n.
-        # We can estimate it as the median or minimum of the empirical
-        # distribution (since most s will have small Fourier coefficients).
-        #
-        # We implement approach (a) with a robust floor estimator, then
-        # subtract it to get cleaner weight estimates.
-
-        empirical_probs = {}
-        for s in range(self.dim_x):
-            empirical_probs[s] = s_counts.get(s, 0) / total_postselected
-
-        # Estimate the noise floor from the bottom quartile of frequencies.
-        # For truly Fourier-sparse phi, most s values sit near the floor.
-        all_probs = sorted(empirical_probs.values())
-        quartile_idx = max(1, len(all_probs) // 4)
-        estimated_floor = np.median(all_probs[:quartile_idx])
-
-        # Extract heavy coefficients
-        heavy = []
-        for s in range(self.dim_x):
-            # Subtract floor to estimate |hat{tilde_phi}(s)|^2
-            raw_prob = empirical_probs[s]
-            estimated_weight = max(0.0, raw_prob - estimated_floor)
-
-            if estimated_weight >= theta:
-                heavy.append(
-                    HeavyCoefficient(
-                        s=s,
-                        s_bits=format(s, f"0{self.n}b"),
-                        estimated_weight=estimated_weight,
-                        count=s_counts.get(s, 0),
-                        total_postselected=total_postselected,
-                    )
-                )
-
-        postselection_rate = (
-            total_postselected / actual_shots if actual_shots > 0 else 0.0
-        )
-
-        return ProverResult(
-            heavy_coefficients=heavy,
-            theta=theta,
-            n=self.n,
-            total_shots=actual_shots,
-            total_postselected=total_postselected,
-            postselection_rate=postselection_rate,
-            all_s_counts=s_counts,
-        )
-
-    def extract_heavy_coefficients_gl(
+    def run_protocol(
         self,
-        theta: float,
-        num_copies_per_query: int = 1000,
-        mode: str = "statevector",
-        delta: float = 0.05,
-        **kwargs,
-    ) -> ProverResult:
-        """
-        Extract heavy Fourier coefficients via Goldreich-Levin / Kushilevitz-
-        Mansour style iterative bisection.
+        epsilon: float,
+        delta: float = 0.1,
+        theta: Optional[float] = None,
+        estimate_coefficients: bool = True,
+        qfs_mode: str = "statevector",
+        qfs_shots: Optional[int] = None,
+        classical_samples: Optional[int] = None,
+    ) -> ProverMessage:
+        r"""
+        Execute the prover's side of the verification protocol.
 
-        This avoids enumerating all 2^n values of s and instead builds up
-        heavy coefficients bit by bit in O(poly(n/epsilon)) time.
+        **Step 1**: Perform QFS to obtain post-selected samples.
 
-        The key idea: for a prefix p of length k, define the "bucket weight"
-            W(p) = sum_{s: s starts with p} |hat{tilde_phi}(s)|^2
+        **Step 2**: Build the empirical spectrum approximation
+        (Corollary 5 / Lemma 3).
 
-        If W(p) < theta, no extension of p can be heavy, so we prune.
-        Otherwise we branch into p||0 and p||1 and recurse.
+        **Step 3**: Extract the heavy coefficient list :math:`L`.
 
-        To estimate W(p) from Fourier samples, we use the fact that under
-        the post-selected distribution, Pr[s has prefix p | b=1] is
-        approximately proportional to W(p).
+        **Step 4** (optional): Estimate the Fourier coefficients
+        for each :math:`s \in L` using classical samples.
 
-        For large n (say n > 20), this is far more efficient than direct
-        thresholding.
+        **Step 5**: Package and return the message.
 
         Parameters
         ----------
-        theta : float
-            Heaviness threshold for |hat{tilde_phi}(s)|^2.
-        num_copies_per_query : int
-            MoS copies per "bucket weight query". More copies = better
-            estimates but more total cost.
-        mode : str
-            Simulation mode.
+        epsilon : float
+            Accuracy parameter :math:`\varepsilon \in (0, 1)`.
+            The prover resolves the Fourier spectrum to accuracy
+            :math:`\varepsilon` in :math:`\ell_\infty`-norm.
         delta : float
-            Confidence parameter. We use a slightly lower threshold
-            internally (theta/2) to avoid missing heavy coefficients
-            due to estimation noise, at the cost of potentially including
-            some spurious ones (which the verifier will catch).
+            Confidence parameter :math:`\delta \in (0, 1)`.
+            The protocol succeeds with probability
+            :math:`\geq 1 - \delta`.
+        theta : float, optional
+            Fourier coefficient resolution threshold
+            :math:`\vartheta`.  If not provided, defaults to
+            ``epsilon`` (appropriate for the functional agnostic
+            case per Theorem 8).  For the distributional case
+            (Theorem 12), should be set according to the
+            promise on the distribution class.
+        estimate_coefficients : bool
+            If True (default), estimate :math:`\hat{\tilde\phi}(s)`
+            for each :math:`s \in L` using classical samples
+            (computational-basis measurement of :math:`\rho_D`).
+            This is needed for the verifier's Fourier weight check.
+        qfs_mode : str
+            QFS simulation mode (``"statevector"``, ``"circuit"``,
+            or ``"batched"``).
+        qfs_shots : int, optional
+            Override the number of QFS shots.  If not provided,
+            computed from the DKW bound (Lemma 3):
+            :math:`m = \lceil 2\log(4/\delta) / (\varepsilon^2/8)^2 \rceil`.
+            Note: since post-selection succeeds with probability 1/2,
+            we double this to get the expected number of accepted samples.
+        classical_samples : int, optional
+            Override the number of classical samples for coefficient
+            estimation.  If not provided, computed from Hoeffding:
+            :math:`m_2 = O(|L| \cdot \log(|L|/\delta) / \varepsilon^2)`.
 
         Returns
         -------
-        result : ProverResult
-            The extracted heavy coefficients and diagnostics.
+        ProverMessage
+            The prover's message to the verifier.
+
+        Raises
+        ------
+        ValueError
+            If parameters are out of range.
         """
-        # We need a pool of Fourier samples to draw from.
-        # Run a large batch and reuse samples for bucket queries.
-        #
-        # Total samples needed: O(n / theta) for GL-style,
-        # but we want enough to estimate bucket weights reliably.
-        # Use Hoeffding: to estimate a probability p to within epsilon
-        # with confidence 1-delta, need O(log(1/delta) / epsilon^2) samples.
+        # --- Parameter validation ---
+        if not 0 < epsilon < 1:
+            raise ValueError(f"epsilon must be in (0, 1), got {epsilon}")
+        if not 0 < delta < 1:
+            raise ValueError(f"delta must be in (0, 1), got {delta}")
 
-        # Conservative estimate of total samples needed
-        # Each level of recursion queries the sample pool, max depth = n
-        # At most 2/theta buckets survive at each level (by Parseval)
-        # So total queries ~ 2n/theta, each needs accurate estimation
-        estimation_accuracy = theta / 4
-        samples_for_confidence = int(
-            np.ceil(2 * np.log(2 * self.n / delta) / estimation_accuracy**2)
+        if theta is None:
+            theta = epsilon
+        if not 0 < theta < 1:
+            raise ValueError(f"theta must be in (0, 1), got {theta}")
+
+        # --- Step 1: Compute required QFS shots ---
+        # From Corollary 5: need m = O(log(1/delta) / tau^2) post-selected
+        # samples where tau = epsilon^2 / 8.
+        # DKW (Lemma 3): m = ceil(2 * log(2/delta_1) / tau^2) with delta_1 = delta/2
+        tau = theta**2 / 8.0
+        if qfs_shots is None:
+            m_postselected = int(np.ceil(2.0 * np.log(4.0 / delta) / tau**2))
+            # Post-selection succeeds ~1/2 the time, so need ~2m total shots.
+            # Add a safety margin for finite-sample fluctuation.
+            qfs_shots = int(np.ceil(2.5 * m_postselected))
+
+        # --- Step 2: Run QFS ---
+        sampler = QuantumFourierSampler(
+            self.state,
+            seed=int(self._rng.integers(0, 2**31)),
         )
-        total_copies = max(num_copies_per_query * 4, samples_for_confidence)
+        qfs_result = sampler.sample(shots=qfs_shots, mode=qfs_mode)
 
-        # Generate the sample pool
-        s_counts, total_postselected, actual_shots = self._run_fourier_sampling(
-            total_copies, mode=mode, **kwargs
+        # --- Step 3: Build empirical spectrum approximation ---
+        spectrum_approx = self._build_spectrum_approximation(
+            qfs_result=qfs_result,
+            theta=theta,
         )
 
-        if total_postselected == 0:
-            return ProverResult(
-                heavy_coefficients=[],
-                theta=theta,
-                n=self.n,
-                total_shots=actual_shots,
-                total_postselected=0,
-                postselection_rate=0.0,
-                all_s_counts=s_counts,
+        # --- Step 4: Extract heavy coefficient list ---
+        L = self._extract_heavy_list(
+            spectrum_approx=spectrum_approx,
+            theta=theta,
+        )
+
+        # --- Step 5: Estimate Fourier coefficients from classical samples ---
+        estimates: dict[int, float] = {}
+        num_classical = 0
+
+        if estimate_coefficients and len(L) > 0:
+            estimates, num_classical = self._estimate_coefficients(
+                L=L,
+                epsilon=epsilon,
+                delta=delta,
+                num_samples_override=classical_samples,
             )
 
-        # Build an array of post-selected s samples for fast bucket queries
-        s_samples = []
-        for s, count in s_counts.items():
-            s_samples.extend([s] * count)
-        s_samples = np.array(s_samples, dtype=np.int64)
-        N = len(s_samples)
-
-        # Estimate noise floor from the empirical distribution
-        empirical_probs = {}
-        for s in range(self.dim_x):
-            empirical_probs[s] = s_counts.get(s, 0) / N
-        all_probs = sorted(empirical_probs.values())
-        quartile_idx = max(1, len(all_probs) // 4)
-        estimated_floor = np.median(all_probs[:quartile_idx])
-
-        def estimate_bucket_weight(prefix: int, prefix_len: int) -> float:
-            """
-            Estimate W(prefix) = sum_{s with given prefix} |hat{phi}(s)|^2.
-
-            We count how many samples s have the given prefix in their
-            top prefix_len bits, divide by N to get an empirical probability,
-            then subtract the expected floor contribution from the bucket.
-            """
-            if prefix_len == 0:
-                # The entire spectrum: W = sum_s |hat{phi}(s)|^2 = E[tilde_phi^2]
-                return 1.0  # Upper bound; will be refined by recursion
-
-            # Mask: top prefix_len bits of s (in an n-bit representation)
-            shift = self.n - prefix_len
-            masked = s_samples >> shift
-            count_in_bucket = int(np.sum(masked == prefix))
-            empirical_prob = count_in_bucket / N
-
-            # Subtract floor: the uniform component contributes
-            # (2^(n - prefix_len)) / 2^n = 1/2^prefix_len per bucket
-            bucket_size = 2 ** (self.n - prefix_len)
-            floor_contribution = estimated_floor * bucket_size
-            estimated_weight = max(0.0, empirical_prob - floor_contribution)
-
-            return estimated_weight
-
-        # Goldreich-Levin style iterative bisection
-        # Start with the empty prefix (all of {0,...,2^n-1})
-        # Frontier: list of (prefix_value, prefix_length) pairs
-        internal_theta = theta / 2  # Lower threshold to avoid false negatives
-
-        frontier = [(0, 0)]  # (prefix_value, prefix_length)
-        heavy_candidates = []
-
-        while frontier:
-            prefix, depth = frontier.pop()
-
-            if depth == self.n:
-                # We've determined all n bits: prefix IS the candidate s
-                s = prefix
-                # Get final weight estimate
-                prob = s_counts.get(s, 0) / N
-                weight = max(0.0, prob - estimated_floor)
-                if weight >= internal_theta:
-                    heavy_candidates.append((s, weight))
-                continue
-
-            # Branch into prefix||0 and prefix||1
-            for bit in [0, 1]:
-                child_prefix = (prefix << 1) | bit
-                child_depth = depth + 1
-
-                w = estimate_bucket_weight(child_prefix, child_depth)
-                if w >= internal_theta:
-                    frontier.append((child_prefix, child_depth))
-
-        # Final filtering at the actual threshold
-        heavy = []
-        for s, weight in heavy_candidates:
-            if weight >= theta:
-                heavy.append(
-                    HeavyCoefficient(
-                        s=s,
-                        s_bits=format(s, f"0{self.n}b"),
-                        estimated_weight=weight,
-                        count=s_counts.get(s, 0),
-                        total_postselected=total_postselected,
-                    )
-                )
-
-        postselection_rate = (
-            total_postselected / actual_shots if actual_shots > 0 else 0.0
-        )
-
-        return ProverResult(
-            heavy_coefficients=heavy,
-            theta=theta,
+        return ProverMessage(
+            L=L,
+            estimates=estimates,
             n=self.n,
-            total_shots=actual_shots,
-            total_postselected=total_postselected,
-            postselection_rate=postselection_rate,
-            all_s_counts=s_counts,
+            epsilon=epsilon,
+            theta=theta,
+            spectrum_approx=spectrum_approx,
+            qfs_result=qfs_result,
+            num_classical_samples=num_classical,
         )
 
-    def extract_heavy_coefficients(
+    # ------------------------------------------------------------------
+    # Step 3: Empirical spectrum approximation (Corollary 5 / Lemma 3)
+    # ------------------------------------------------------------------
+
+    def _build_spectrum_approximation(
+        self,
+        qfs_result: QFSResult,
+        theta: float,
+    ) -> SpectrumApproximation:
+        r"""
+        Build a succinct empirical approximation to the QFS distribution.
+
+        From the post-selected QFS samples, compute the empirical
+        distribution :math:`\tilde{q}_m(s, 1)` for each observed
+        frequency :math:`s`.
+
+        By Lemma 3 (DKW), with :math:`m` post-selected samples:
+
+        .. math::
+
+            \|\tilde{q}_m - q\|_\infty \leq \tau
+
+        with probability :math:`\geq 1 - 2\exp(-m\tau^2/2)`.
+
+        The empirical distribution :math:`\tilde{q}_m(s, 1)` relates
+        to the Fourier coefficients via:
+
+        .. math::
+
+            \tilde{q}_m(s, 1) \approx q(s, 1)
+            = \frac{1}{2}\Bigl[
+              \frac{1 - \mathbb{E}[\tilde\phi^2]}{2^n}
+              + \hat{\tilde\phi}(s)^2
+            \Bigr]
+
+        We store the (sparse) empirical distribution and use it to
+        identify heavy coefficients.
+
+        Parameters
+        ----------
+        qfs_result : QFSResult
+            Output from the QFS procedure.
+        theta : float
+            Resolution threshold.
+
+        Returns
+        -------
+        SpectrumApproximation
+        """
+        n = self.n
+
+        # Build empirical distribution from post-selected counts
+        # qfs_result.postselected_counts maps n-bit strings to counts
+        ps_total = qfs_result.postselected_shots
+
+        # Compute extraction threshold: epsilon^2 / 4
+        # In terms of q(s, 1) = (1/2) * Pr[s | b=1], the threshold
+        # for the full (n+1)-bit distribution is epsilon^2 / 8.
+        # But since we're working with the conditional distribution
+        # Pr[s | b=1] directly (post-selected), the threshold on the
+        # conditional distribution is epsilon^2 / 4.
+        # (See Corollary 5 proof: if q~_m(s,1) >= eps^2/4 then s in L)
+        extraction_threshold = theta**2 / 4.0
+
+        entries: dict[int, float] = {}
+        if ps_total > 0:
+            for bitstring, count in qfs_result.postselected_counts.items():
+                s = int(bitstring, 2)
+                empirical_prob = count / ps_total
+                if empirical_prob >= extraction_threshold:
+                    entries[s] = empirical_prob
+
+        return SpectrumApproximation(
+            entries=entries,
+            threshold=extraction_threshold,
+            n=n,
+            num_qfs_samples=ps_total,
+            total_qfs_shots=qfs_result.total_shots,
+        )
+
+    # ------------------------------------------------------------------
+    # Step 4: Extract heavy coefficient list
+    # ------------------------------------------------------------------
+
+    def _extract_heavy_list(
+        self,
+        spectrum_approx: SpectrumApproximation,
+        theta: float,
+    ) -> list[int]:
+        r"""
+        Extract the list :math:`L` of candidate heavy Fourier
+        coefficient indices.
+
+        From Corollary 5:
+
+        - **Completeness**: If :math:`|\hat{\tilde\phi}(s)| \geq \vartheta`,
+          then :math:`s \in L`.
+        - **Partial soundness**: If :math:`s \in L`, then
+          :math:`|\hat{\tilde\phi}(s)| \geq \vartheta/4`.
+
+        The list size is bounded by Parseval:
+        :math:`|L| \leq 16/\vartheta^2`.
+
+        Parameters
+        ----------
+        spectrum_approx : SpectrumApproximation
+            The empirical spectrum approximation.
+        theta : float
+            Resolution threshold :math:`\vartheta`.
+
+        Returns
+        -------
+        L : list[int]
+            Sorted by empirical weight (descending).
+        """
+        # L consists of all s with empirical probability >= theta^2 / 4
+        # These are exactly the entries stored in spectrum_approx
+        L = sorted(
+            spectrum_approx.entries.keys(),
+            key=lambda s: spectrum_approx.entries[s],
+            reverse=True,
+        )
+
+        # Sanity check: Parseval bound
+        parseval_bound = int(np.ceil(16.0 / theta**2))
+        if len(L) > parseval_bound:
+            # This shouldn't happen with enough samples, but can occur
+            # due to finite-sample noise.  Truncate to Parseval bound,
+            # keeping the heaviest entries.
+            L = L[:parseval_bound]
+
+        return L
+
+    # ------------------------------------------------------------------
+    # Step 5: Classical coefficient estimation
+    # ------------------------------------------------------------------
+
+    def _estimate_coefficients(
+        self,
+        L: list[int],
+        epsilon: float,
+        delta: float,
+        num_samples_override: Optional[int] = None,
+    ) -> tuple[dict[int, float], int]:
+        r"""
+        Estimate Fourier coefficients for each :math:`s \in L`
+        from classical random examples.
+
+        By Lemma 1, computational-basis measurement of :math:`\rho_D`
+        yields classical samples from :math:`D`.  For each :math:`s`,
+
+        .. math::
+
+            \hat{\tilde\phi}(s) = \mathbb{E}_{(x,y) \sim D}
+            [(1 - 2y)(-1)^{s \cdot x}]
+
+        so we estimate this expectation via sample mean.  By Hoeffding,
+        :math:`m_2 = O(\log(|L|/\delta) / \varepsilon^2)` samples
+        suffice for simultaneous :math:`\varepsilon`-accuracy across
+        all :math:`s \in L`.
+
+        Parameters
+        ----------
+        L : list[int]
+            Frequency indices to estimate.
+        epsilon : float
+            Desired accuracy per coefficient.
+        delta : float
+            Overall confidence parameter.
+        num_samples_override : int, optional
+            Override the computed sample count.
+
+        Returns
+        -------
+        estimates : dict[int, float]
+            ``estimates[s]`` is the empirical estimate of
+            :math:`\hat{\tilde\phi}(s)` for each :math:`s \in L`.
+        num_samples : int
+            Number of classical samples used.
+        """
+        L_size = len(L)
+        if L_size == 0:
+            return {}, 0
+
+        # Hoeffding bound: for each s, need m2 samples for eps-accuracy
+        # with failure probability delta / (2 * |L|).
+        # Since |(1-2y)(-1)^{s.x}| <= 1, the range is 2.
+        # Hoeffding: P[|mean - E| > eps] <= 2*exp(-2*m2*eps^2 / 4)
+        #   = 2*exp(-m2*eps^2/2)
+        # Want this <= delta / (2*|L|), so:
+        #   m2 >= (2 / eps^2) * log(4*|L| / delta)
+        if num_samples_override is not None:
+            num_samples = num_samples_override
+        else:
+            num_samples = int(np.ceil(2.0 / epsilon**2 * np.log(4.0 * L_size / delta)))
+            # Minimum sensible sample count
+            num_samples = max(num_samples, 100)
+
+        # Draw classical samples via computational-basis measurement
+        xs, ys = self.state.sample_classical_batch(
+            num_samples=num_samples,
+            rng=self._rng,
+        )
+
+        # Compute (1 - 2y) for all samples
+        signed_labels = 1.0 - 2.0 * ys.astype(np.float64)  # shape (m2,)
+
+        # For each s in L, compute the empirical mean of (1-2y)*chi_s(x)
+        estimates: dict[int, float] = {}
+        for s in L:
+            # chi_s(x) = (-1)^{popcount(s & x)}
+            parities = np.array(
+                [bin(s & int(x)).count("1") % 2 for x in xs],
+                dtype=np.float64,
+            )
+            chi_s = 1.0 - 2.0 * parities
+            est = float(np.mean(signed_labels * chi_s))
+            # Project to [-1, 1] for safety
+            est = np.clip(est, -1.0, 1.0)
+            estimates[s] = est
+
+        return estimates, num_samples
+
+    # ------------------------------------------------------------------
+    # Convenience: direct access to exact quantities (for validation)
+    # ------------------------------------------------------------------
+
+    def exact_heavy_coefficients(
         self,
         theta: float,
-        num_copies: int = 10000,
-        method: str = "auto",
-        mode: str = "statevector",
-        **kwargs,
-    ) -> ProverResult:
-        """
-        Unified interface for heavy Fourier coefficient extraction.
+        *,
+        effective: bool = True,
+    ) -> list[tuple[int, float]]:
+        r"""
+        Return the exact list of heavy Fourier coefficients
+        (for validation / comparison with the empirical list).
 
         Parameters
         ----------
         theta : float
-            Heaviness threshold for |hat{tilde_phi}(s)|^2.
-        num_copies : int
-            Total MoS copies budget.
-        method : str
-            "threshold" - direct enumeration (practical for n <= ~20)
-            "gl" - Goldreich-Levin style (efficient for large n)
-            "auto" - choose based on n
-        mode : str
-            Simulation mode for the underlying Hadamard measurements.
+            Threshold: returns all :math:`s` with
+            :math:`|\hat{\tilde\phi}(s)| \geq \vartheta`.
+        effective : bool
+            If True, use noise-adjusted coefficients.
 
         Returns
         -------
-        result : ProverResult
+        heavy : list[tuple[int, float]]
+            Pairs :math:`(s, \hat{\tilde\phi}(s))`, sorted by
+            absolute value descending.
         """
-        if method == "auto":
-            # GL becomes worthwhile when 2^n is large
-            method = "threshold" if self.n <= 16 else "gl"
-
-        if method == "threshold":
-            return self.extract_heavy_coefficients_threshold(
-                theta=theta, num_copies=num_copies, mode=mode, **kwargs
-            )
-        elif method == "gl":
-            return self.extract_heavy_coefficients_gl(
-                theta=theta, num_copies_per_query=num_copies // 4, mode=mode, **kwargs
-            )
-        else:
-            raise ValueError(f"Unknown method: {method}")
-
-    def compute_ground_truth_heavy(self, theta: float) -> List[Tuple[int, float]]:
-        """
-        Compute the true heavy Fourier coefficients (for validation).
-
-        Uses the simulator's exact Fourier coefficient computation.
-
-        Parameters
-        ----------
-        theta : float
-            Threshold.
-
-        Returns
-        -------
-        heavy : list of (s, |hat{tilde_phi}(s)|^2) pairs
-        """
-        heavy = []
-        for s in range(self.dim_x):
-            fc = self.sim.fourier_coefficient(s)
-            weight = fc**2
-            if weight >= theta:
-                heavy.append((s, weight))
-        return sorted(heavy, key=lambda t: t[1], reverse=True)
+        spectrum = self.state.fourier_spectrum(effective=effective)
+        heavy = [
+            (s, float(spectrum[s]))
+            for s in range(self.state.dim_x)
+            if abs(spectrum[s]) >= theta
+        ]
+        heavy.sort(key=lambda t: abs(t[1]), reverse=True)
+        return heavy
