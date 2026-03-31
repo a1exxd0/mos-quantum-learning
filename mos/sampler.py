@@ -465,18 +465,6 @@ class QuantumFourierSampler:
             idx = self._rng.choice(dim_total, p=probs)
 
             # Convert index to (n+1)-bit string (Qiskit little-endian)
-            bitstring = format(idx, f"0{n + 1}b")[::-1]
-            # In our indexing:
-            #   idx = s + b * 2^n
-            # where s uses the same little-endian integer convention as
-            # Qiskit.  Qiskit's bitstring representation puts the highest
-            # qubit index on the LEFT.  So the bitstring for qubit indices
-            # [q0, q1, ..., qn] is written as "qn ... q1 q0".
-            # We need: bit at position i in the string (from right) = bit i of idx.
-            # format(idx, f"0{n+1}b") gives big-endian: MSB on left.
-            # Qiskit convention: MSB (= highest qubit) on left.
-            # Our idx encodes qubit n as the MSB (bit n of idx = b).
-            # So format(idx, ...) in big-endian IS Qiskit convention.
             bitstring = format(idx, f"0{n + 1}b")
 
             counts[bitstring] = counts.get(bitstring, 0) + 1
