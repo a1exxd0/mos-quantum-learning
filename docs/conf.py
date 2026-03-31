@@ -14,7 +14,12 @@ extensions = [
     "sphinx.ext.mathjax",
     "sphinx.ext.viewcode",
     "sphinx.ext.napoleon",
+    "sphinx.ext.extlinks",
 ]
+
+extlinks = {
+    "doi": ("https://doi.org/%s", "doi:%s"),
+}
 
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True

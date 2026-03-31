@@ -1,700 +1,740 @@
+r"""
+Classical Verifier for Quantum Learning — §6 of Caro et al. (ITCS 2024).
+
+Implements the verifier side of the interactive verification protocol for
+distributional agnostic quantum parity and Fourier-sparse learning.
+
+**Protocol overview** (verifier's role):
+
+1. **Receive** the prover's message: a list :math:`L = \{s_1, \ldots, s_{|L|}\}`
+   of candidate heavy Fourier coefficient indices (and optionally estimated
+   coefficient values).
+
+2. **Validate list size**: reject if :math:`|L|` exceeds the Parseval bound.
+
+3. **Independently estimate** the Fourier coefficients
+   :math:`\hat{\tilde\phi}(s)` for each :math:`s \in L` using the verifier's
+   own classical random example access (Lemma 1 / Hoeffding bound).
+
+4. **Check accumulated Fourier weight**: verify that
+
+   .. math::
+
+       \sum_{s \in L} \hat{\xi}(s)^2 \geq \tau_{\text{accept}}
+
+   where :math:`\tau_{\text{accept}}` depends on the distribution class
+   promise (Definition 14).  For the functional case (:math:`a = b = 1`),
+   the threshold is :math:`1 - \varepsilon^2/8`.  For the distributional
+   case, it is :math:`a^2 - \varepsilon^2/8`.
+
+5. **Output hypothesis**:
+
+   - *Parity learning* (Theorems 7/8/11/12):
+     :math:`s_{\text{out}} = \arg\max_{s \in L} |\hat{\xi}(s)|`,
+     hypothesis :math:`h(x) = s_{\text{out}} \cdot x`.
+
+   - *Fourier-sparse learning* (Theorems 9/10/14/15):
+     pick :math:`k` heaviest from :math:`L`, build randomized hypothesis
+     per Lemma 14.
+
+**Soundness** is information-theoretic: the verifier's checks guarantee
+correctness regardless of the prover's strategy.  In particular, if the
+verifier accepts, the output hypothesis satisfies the agnostic learning
+guarantee with high probability — even against a computationally
+unbounded dishonest prover.
+
+**Copy complexity** (verifier): :math:`O(b^4 \log(1/\delta\vartheta^2) /
+(\varepsilon^4 \vartheta^4))` classical random examples (Theorem 12).
+
+References
+----------
+- Caro et al., "Classical Verification of Quantum Learning", ITCS 2024.
+  §6.1 (Theorems 7–10), §6.2 (noisy), §6.3 (Theorems 11–16).
+- Definitions 13, 14 for distribution class promises.
 """
-Classical Verifier and Interactive Protocol for MoS Quantum Learning.
 
-Implements the classical verifier's role and the full interactive protocol
-from Caro et al. "Classical Verification of Quantum Learning" (2306.04843).
-
-The protocol:
-  1. Prover (quantum): uses MoS copies + Hadamard measurement to extract
-     heavy Fourier coefficients, sends list L = {s1,...,s_|L|} to verifier.
-  2. Verifier (classical): using only random examples (x,y) ~ D:
-     a) Estimates each hat{tilde_phi}(s_i)^2 for s_i in L
-     b) Estimates the total squared Fourier weight sum_L hat{tilde_phi}(s)^2
-     c) Checks this against the a priori known total weight interval [a^2, b^2]
-     d) Accepts and builds hypothesis if weight check passes; rejects otherwise.
-  3. Hypothesis construction: if accepted, the verifier builds
-     h(x) = sign(sum_{s in L} hat{tilde_phi}_est(s) * chi_s(x))
-     (thresholded to {0,1}) as the agnostic parity / Fourier-sparse hypothesis.
-
-Classical Fourier coefficient estimation:
-  For any s, the verifier can estimate hat{tilde_phi}(s) from random examples
-  (x,y) ~ D = (U_n, phi) using:
-    hat{tilde_phi}(s) = E_x[tilde_phi(x) * chi_s(x)]
-                       = E_{(x,y)}[(1 - 2y) * (-1)^{<s,x>}]
-  This is just the sample mean of (1-2y)*(-1)^{<s,x>} over random examples.
-"""
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional, Union
 
 import numpy as np
-from typing import Optional, List, Tuple, Dict, NamedTuple
-from dataclasses import dataclass, field
-from enum import Enum
 from numpy.random import Generator, default_rng
 
-
-# ---------------------------------------------------------------------------
-# Data structures
-# ---------------------------------------------------------------------------
-
-class VerificationDecision(Enum):
-    ACCEPT = "ACCEPT"
-    REJECT = "REJECT"
+from mos import MoSState
+from ql.prover import ProverMessage
 
 
-@dataclass
-class FourierEstimate:
-    """Verifier's estimate of a single Fourier coefficient."""
-    s: int
-    s_bits: str
-    estimated_coeff: float      # hat{tilde_phi}(s) estimate
-    estimated_weight: float     # |hat{tilde_phi}(s)|^2 estimate
-    std_error: float            # Standard error of coefficient estimate
-    num_samples: int            # Classical samples used for this estimate
+# ===================================================================
+# Result types
+# ===================================================================
 
 
-@dataclass
-class VerifierResult:
-    """Output from the classical verifier."""
-    decision: VerificationDecision
-    reason: str
-    estimated_list_weight: float        # sum_{s in L} |hat{phi}(s)|^2
-    expected_weight_interval: Tuple[float, float]  # [a^2, b^2]
-    fourier_estimates: List[FourierEstimate]
-    hypothesis_coefficients: Dict[int, float]  # s -> hat{tilde_phi}(s) for h
-    num_classical_samples: int
-    epsilon: float
-    delta: float
+class VerificationOutcome(Enum):
+    """Outcome of the verification protocol."""
 
-    def summary(self) -> str:
-        lines = [
-            f"Verifier Result: {self.decision.value}",
-            f"  Reason: {self.reason}",
-            f"  Classical samples used: {self.num_classical_samples}",
-            f"  epsilon={self.epsilon}, delta={self.delta}",
-            f"  Estimated list weight:  {self.estimated_list_weight:.6f}",
-            f"  Expected interval:      "
-            f"[{self.expected_weight_interval[0]:.6f}, "
-            f"{self.expected_weight_interval[1]:.6f}]",
-            f"  Fourier estimates ({len(self.fourier_estimates)}):",
-        ]
-        if self.fourier_estimates:
-            lines.append(
-                f"    {'s':>6} {'bits':>12} {'φ̂(s)':>10} "
-                f"{'|φ̂(s)|²':>10} {'±stderr':>10}"
-            )
-            lines.append(f"    {'-'*6} {'-'*12} {'-'*10} {'-'*10} {'-'*10}")
-            for fe in sorted(self.fourier_estimates,
-                             key=lambda f: abs(f.estimated_coeff), reverse=True):
-                lines.append(
-                    f"    {fe.s:>6} {fe.s_bits:>12} "
-                    f"{fe.estimated_coeff:>+10.6f} "
-                    f"{fe.estimated_weight:>10.6f} "
-                    f"{fe.std_error:>10.6f}"
-                )
-        return "\n".join(lines)
+    ACCEPT = "accept"
+    REJECT_LIST_TOO_LARGE = "reject_list_too_large"
+    REJECT_INSUFFICIENT_WEIGHT = "reject_insufficient_weight"
 
 
-@dataclass
-class ProtocolTranscript:
-    """Full transcript of the interactive protocol."""
-    n: int
-    epsilon: float
-    delta: float
-    theta: float
+class HypothesisType(Enum):
+    """Type of hypothesis output by the verifier."""
 
-    # Round 1: Prover -> Verifier
-    prover_list: List[int]                # L = {s1,...,s_|L|}
-    prover_weights: Dict[int, float]      # Prover's weight estimates
-
-    # Round 2: Verifier's checks
-    verifier_result: 'VerifierResult'
-
-    # Final output
-    hypothesis: Optional[Dict[int, float]]  # s -> coefficient, or None
-
-    def summary(self) -> str:
-        lines = [
-            "=" * 60,
-            "PROTOCOL TRANSCRIPT",
-            "=" * 60,
-            f"Parameters: n={self.n}, epsilon={self.epsilon}, "
-            f"delta={self.delta}, theta={self.theta}",
-            "",
-            "--- Round 1: Prover -> Verifier ---",
-            f"  Prover sends list L of {len(self.prover_list)} "
-            f"heavy coefficients: {sorted(self.prover_list)}",
-        ]
-        if self.prover_weights:
-            lines.append("  Prover's weight estimates:")
-            for s in sorted(self.prover_weights):
-                lines.append(
-                    f"    s={s}: |φ̂(s)|² ≈ {self.prover_weights[s]:.6f}"
-                )
-
-        lines.extend([
-            "",
-            "--- Round 2: Verifier checks ---",
-            self.verifier_result.summary(),
-        ])
-
-        if self.hypothesis is not None:
-            lines.extend([
-                "",
-                "--- Hypothesis ---",
-                "  h(x) = sign(sum_s c_s * chi_s(x)), thresholded to {0,1}",
-                "  Coefficients:",
-            ])
-            for s in sorted(self.hypothesis):
-                lines.append(f"    s={s}: c_s = {self.hypothesis[s]:+.6f}")
-        else:
-            lines.extend(["", "--- No hypothesis produced (rejected) ---"])
-
-        lines.append("=" * 60)
-        return "\n".join(lines)
+    PARITY = "parity"
+    FOURIER_SPARSE = "fourier_sparse"
 
 
-# ---------------------------------------------------------------------------
-# Classical random example oracle
-# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class ParityHypothesis:
+    r"""
+    Parity hypothesis :math:`h(x) = s \cdot x \mod 2`.
 
-class ClassicalExampleOracle:
-    """
-    Classical random example oracle for D = (U_n, phi).
-
-    Samples (x, y) where x ~ Uniform({0,1}^n), y ~ Bernoulli(phi(x)).
-    This is the verifier's data access model.
-    """
-
-    def __init__(self, n: int, phi: np.ndarray, seed: Optional[int] = None):
-        self.n = n
-        self.dim_x = 2 ** n
-        self._phi = np.asarray(phi, dtype=np.float64)
-        self.rng = default_rng(seed)
-
-    def sample(self, num_samples: int) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Draw num_samples i.i.d. random examples (x, y).
-
-        Returns
-        -------
-        xs : np.ndarray of shape (num_samples,), dtype=int
-            Uniformly random inputs.
-        ys : np.ndarray of shape (num_samples,), dtype=int
-            Labels y ~ Bernoulli(phi(x)).
-        """
-        xs = self.rng.integers(0, self.dim_x, size=num_samples)
-        probs = self._phi[xs]
-        ys = (self.rng.random(num_samples) < probs).astype(np.int64)
-        return xs, ys
-
-
-# ---------------------------------------------------------------------------
-# Classical Verifier
-# ---------------------------------------------------------------------------
-
-class MoSVerifier:
-    """
-    Classical verifier for the MoS verification protocol.
-
-    The verifier has access only to classical random examples (x, y) ~ D.
-    It receives a list L of claimed heavy Fourier coefficients from the prover
-    and must verify the claim using classical statistics.
-
-    Parameters
+    Attributes
     ----------
-    oracle : ClassicalExampleOracle
-        Source of classical random examples.
+    s : int
+        The parity vector, as an integer in :math:`\{0, \ldots, 2^n - 1\}`.
+    n : int
+        Number of input bits.
+    estimated_coefficient : float
+        The verifier's estimate of :math:`\hat{\tilde\phi}(s)`.
+    """
+
+    s: int
+    n: int
+    estimated_coefficient: float
+
+    def evaluate(self, x: int) -> int:
+        r"""Evaluate :math:`h(x) = s \cdot x \mod 2`."""
+        return bin(self.s & x).count("1") % 2
+
+    def evaluate_batch(self, xs: np.ndarray) -> np.ndarray:
+        """Evaluate the hypothesis on a batch of inputs."""
+        return np.array(
+            [bin(self.s & int(x)).count("1") % 2 for x in xs],
+            dtype=np.uint8,
+        )
+
+
+@dataclass(frozen=True)
+class FourierSparseHypothesis:
+    r"""
+    Randomised Fourier-sparse hypothesis per Lemma 14.
+
+    Given estimated coefficients :math:`\tilde\phi(s_\ell)` for
+    :math:`\ell = 1, \ldots, k`, defines
+    :math:`g(x) = \sum_\ell \tilde\phi(s_\ell) \chi_{s_\ell}(x)`
+    and the randomised hypothesis
+
+    .. math::
+
+        h(x) = 1 \text{ with probability }
+        p(x) = \frac{(1 - g(x))^2}{2(1 + g(x)^2)}
+
+    Attributes
+    ----------
+    coefficients : dict[int, float]
+        Maps each :math:`s_\ell` to its estimated coefficient.
     n : int
         Number of input bits.
     """
 
-    def __init__(self, oracle: ClassicalExampleOracle, n: int):
-        self.oracle = oracle
-        self.n = n
-        self.dim_x = 2 ** n
+    coefficients: dict[int, float]
+    n: int
 
-    def _parity(self, s: int, x: int) -> int:
-        """Compute <s, x> mod 2 = popcount(s & x) mod 2."""
-        return bin(s & x).count('1') % 2
-
-    def estimate_fourier_coefficient(
-        self,
-        s: int,
-        num_samples: int
-    ) -> FourierEstimate:
-        """
-        Estimate hat{tilde_phi}(s) from classical random examples.
-
-        Uses the identity:
-            hat{tilde_phi}(s) = E_{(x,y)~D}[(1 - 2y) * (-1)^{<s,x>}]
-
-        Each sample gives a term in {-1, +1}, and we take the mean.
-
-        Parameters
-        ----------
-        s : int
-            The frequency to estimate.
-        num_samples : int
-            Number of classical random examples to use.
-
-        Returns
-        -------
-        estimate : FourierEstimate
-        """
-        xs, ys = self.oracle.sample(num_samples)
-
-        # Compute (1 - 2y) * (-1)^{<s,x>} for each sample
-        tilde_y = 1 - 2 * ys  # maps y in {0,1} to {+1,-1}
-
-        # Vectorised parity computation
-        # For each x, compute popcount(s & x) mod 2
-        sx = s & xs  # bitwise AND
-        # popcount mod 2: XOR fold
-        parities = np.zeros(len(xs), dtype=np.int64)
-        temp = sx.copy()
-        while np.any(temp > 0):
-            parities ^= (temp & 1)
-            temp >>= 1
-        chi_s = 1 - 2 * parities  # (-1)^{<s,x>}
-
-        terms = tilde_y * chi_s
-        estimated_coeff = float(np.mean(terms))
-        std_error = float(np.std(terms, ddof=1) / np.sqrt(num_samples))
-
-        return FourierEstimate(
-            s=s,
-            s_bits=format(s, f'0{self.n}b'),
-            estimated_coeff=estimated_coeff,
-            estimated_weight=estimated_coeff ** 2,
-            std_error=std_error,
-            num_samples=num_samples,
-        )
-
-    def verify(
-        self,
-        prover_list: List[int],
-        weight_interval: Tuple[float, float],
-        epsilon: float = 0.1,
-        delta: float = 0.05,
-        samples_per_coefficient: Optional[int] = None,
-    ) -> VerifierResult:
-        """
-        Verify the prover's claimed list of heavy Fourier coefficients.
-
-        Verification procedure:
-        1. For each s in prover_list L, estimate hat{tilde_phi}(s) using
-           classical random examples.
-        2. Compute the estimated total squared Fourier weight of L:
-           W_L = sum_{s in L} hat{tilde_phi}(s)^2
-        3. Check whether W_L falls within the expected interval [a^2, b^2]
-           (with tolerance for estimation error).
-        4. Accept if the weight check passes; reject otherwise.
-
-        The soundness argument: if the prover omitted a truly heavy
-        coefficient or included a spurious one, the total weight W_L will
-        deviate from the known interval [a^2, b^2].
-
-        Parameters
-        ----------
-        prover_list : list of int
-            The list L of claimed heavy Fourier coefficient indices.
-        weight_interval : (float, float)
-            The a priori known interval [a^2, b^2] for the total squared
-            Fourier weight sum_s hat{tilde_phi}(s)^2. In the paper, this
-            comes from the restricted distribution class D.
-        epsilon : float
-            Accuracy parameter for the agnostic learning guarantee.
-        delta : float
-            Confidence parameter.
-        samples_per_coefficient : int, optional
-            Classical samples per coefficient estimate. If None, computed
-            from epsilon and delta for the theoretical guarantee:
-            O(log(|L|/delta) / epsilon^2).
-
-        Returns
-        -------
-        result : VerifierResult
-        """
-        L = prover_list
-        a_sq, b_sq = weight_interval
-
-        # Determine samples per coefficient for desired accuracy
-        if samples_per_coefficient is None:
-            # By Hoeffding, to estimate each coefficient to accuracy
-            # epsilon / (2 * sqrt(|L|)) with confidence delta / |L|,
-            # need O(|L| * log(|L|/delta) / epsilon^2) samples.
-            # This ensures the total weight estimate is accurate to ~ epsilon.
-            safe_L = max(len(L), 1)
-            samples_per_coefficient = int(np.ceil(
-                2 * safe_L * np.log(2 * safe_L / delta) / (epsilon ** 2)
-            ))
-            # Minimum for reasonable estimates
-            samples_per_coefficient = max(samples_per_coefficient, 500)
-
-        total_samples = samples_per_coefficient * len(L) if L else 0
-
-        # Step 1: Estimate each Fourier coefficient in L
-        fourier_estimates = []
-        for s in L:
-            fe = self.estimate_fourier_coefficient(s, samples_per_coefficient)
-            fourier_estimates.append(fe)
-
-        # Step 2: Compute total estimated squared Fourier weight of L
-        estimated_list_weight = sum(fe.estimated_weight for fe in fourier_estimates)
-
-        # Estimation error bound for total weight
-        # Each coefficient estimate has variance <= 1/num_samples,
-        # so the squared coefficient has variance that we bound via
-        # the delta method. Conservative bound:
-        total_stderr = sum(
-            2 * abs(fe.estimated_coeff) * fe.std_error
-            for fe in fourier_estimates
-        )
-
-        # Step 3: Weight check
-        # The prover's list should capture essentially all the Fourier
-        # weight. Allow tolerance for estimation error.
-        tolerance = 3 * total_stderr + epsilon  # 3-sigma + epsilon slack
-
-        # Check: is the estimated weight consistent with [a^2, b^2]?
-        weight_lower = estimated_list_weight - tolerance
-        weight_upper = estimated_list_weight + tolerance
-
-        if weight_upper < a_sq:
-            # The list has too little weight — prover likely omitted
-            # heavy coefficients
-            decision = VerificationDecision.REJECT
-            reason = (
-                f"Estimated list weight {estimated_list_weight:.6f} "
-                f"(± {tolerance:.6f}) falls below expected lower bound "
-                f"{a_sq:.6f}. Prover likely omitted heavy coefficients."
-            )
-        elif weight_lower > b_sq:
-            # The list has too much weight — prover included spurious
-            # coefficients or the distribution is outside the class
-            decision = VerificationDecision.REJECT
-            reason = (
-                f"Estimated list weight {estimated_list_weight:.6f} "
-                f"(± {tolerance:.6f}) exceeds expected upper bound "
-                f"{b_sq:.6f}. Prover may have included spurious coefficients."
-            )
-        else:
-            decision = VerificationDecision.ACCEPT
-            reason = (
-                f"Estimated list weight {estimated_list_weight:.6f} "
-                f"(± {tolerance:.6f}) is consistent with expected interval "
-                f"[{a_sq:.6f}, {b_sq:.6f}]."
-            )
-
-        # Step 4: If accepted, build hypothesis coefficients
-        hypothesis_coefficients = {}
-        if decision == VerificationDecision.ACCEPT:
-            for fe in fourier_estimates:
-                hypothesis_coefficients[fe.s] = fe.estimated_coeff
-
-        return VerifierResult(
-            decision=decision,
-            reason=reason,
-            estimated_list_weight=estimated_list_weight,
-            expected_weight_interval=weight_interval,
-            fourier_estimates=fourier_estimates,
-            hypothesis_coefficients=hypothesis_coefficients,
-            num_classical_samples=total_samples,
-            epsilon=epsilon,
-            delta=delta,
-        )
-
-
-# ---------------------------------------------------------------------------
-# Hypothesis
-# ---------------------------------------------------------------------------
-
-class FourierHypothesis:
-    """
-    Hypothesis constructed from verified Fourier coefficients.
-
-    h(x) = 1  if  sum_{s in L} c_s * chi_s(x) >= 0
-    h(x) = 0  otherwise
-
-    where c_s = hat{tilde_phi}(s) and chi_s(x) = (-1)^{<s,x>}.
-
-    For parity learning (|L| = 1), this reduces to h(x) = chi_{s*}(x)
-    mapped to {0,1}.
-    """
-
-    def __init__(self, n: int, coefficients: Dict[int, float]):
-        """
-        Parameters
-        ----------
-        n : int
-            Number of input bits.
-        coefficients : dict
-            {s: c_s} mapping frequency indices to estimated coefficients.
-        """
-        self.n = n
-        self.dim_x = 2 ** n
-        self.coefficients = coefficients
-
-    def predict(self, x: int) -> int:
-        """Predict label for a single input x."""
+    def g(self, x: int) -> float:
+        r"""Evaluate :math:`g(x) = \sum_\ell \hat\xi(s_\ell) \chi_{s_\ell}(x)`."""
         val = 0.0
-        for s, c in self.coefficients.items():
-            parity = bin(s & x).count('1') % 2
-            chi_s = 1 - 2 * parity
-            val += c * chi_s
-        # tilde_phi > 0 means phi < 0.5 means y=0 more likely
-        # tilde_phi < 0 means phi > 0.5 means y=1 more likely
-        # h predicts the more likely label
-        return 0 if val >= 0 else 1
+        for s, coeff in self.coefficients.items():
+            parity = bin(s & x).count("1") % 2
+            chi_s = 1.0 - 2.0 * parity
+            val += coeff * chi_s
+        return val
 
-    def predict_batch(self, xs: np.ndarray) -> np.ndarray:
-        """Predict labels for a batch of inputs."""
-        vals = np.zeros(len(xs), dtype=np.float64)
-        for s, c in self.coefficients.items():
-            sx = s & xs
-            parities = np.zeros(len(xs), dtype=np.int64)
-            temp = sx.copy()
-            while np.any(temp > 0):
-                parities ^= (temp & 1)
-                temp >>= 1
-            chi_s = 1 - 2 * parities
-            vals += c * chi_s
-        return (vals < 0).astype(np.int64)
+    def evaluate(self, x: int, rng: Optional[Generator] = None) -> int:
+        """Evaluate the randomised hypothesis at x."""
+        if rng is None:
+            rng = default_rng()
+        gx = self.g(x)
+        p = (1.0 - gx) ** 2 / (2.0 * (1.0 + gx**2))
+        p = np.clip(p, 0.0, 1.0)
+        return int(rng.random() < p)
 
-    def evaluate_risk(
-        self,
-        oracle: ClassicalExampleOracle,
-        num_samples: int = 10000,
-    ) -> float:
-        """
-        Estimate the risk Pr_{(x,y)~D}[h(x) != y] using random examples.
-        """
-        xs, ys = oracle.sample(num_samples)
-        predictions = self.predict_batch(xs)
-        return float(np.mean(predictions != ys))
-
-    def evaluate_excess_risk(
-        self,
-        oracle: ClassicalExampleOracle,
-        best_parity_risk: float,
-        num_samples: int = 10000,
-    ) -> float:
-        """
-        Estimate excess risk: risk(h) - risk(best parity).
-        """
-        risk = self.evaluate_risk(oracle, num_samples)
-        return risk - best_parity_risk
+    def evaluate_batch(
+        self, xs: np.ndarray, rng: Optional[Generator] = None
+    ) -> np.ndarray:
+        """Evaluate the hypothesis on a batch of inputs."""
+        if rng is None:
+            rng = default_rng()
+        return np.array([self.evaluate(int(x), rng=rng) for x in xs], dtype=np.uint8)
 
 
-# ---------------------------------------------------------------------------
-# Interactive Protocol Orchestrator
-# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class VerificationResult:
+    r"""
+    Complete result of the classical verification protocol.
 
-class MoSProtocol:
+    Attributes
+    ----------
+    outcome : VerificationOutcome
+        Whether the verifier accepted or rejected (and why).
+    hypothesis : ParityHypothesis | FourierSparseHypothesis | None
+        The output hypothesis (None if rejected).
+    hypothesis_type : HypothesisType | None
+        The type of hypothesis produced.
+    verifier_estimates : dict[int, float]
+        The verifier's independent Fourier coefficient estimates
+        :math:`\hat\xi(s)` for each :math:`s \in L`.
+    accumulated_weight : float
+        :math:`\sum_{s \in L} \hat\xi(s)^2`.
+    acceptance_threshold : float
+        The threshold that accumulated_weight was compared against.
+    list_received : list[int]
+        The list :math:`L` received from the prover.
+    list_size_bound : int
+        The Parseval-derived bound on :math:`|L|`.
+    n : int
+        Number of input bits.
+    epsilon : float
+        Accuracy parameter.
+    num_classical_samples : int
+        Number of classical samples the verifier consumed.
     """
-    Orchestrates the full interactive verification protocol.
 
-    Ties together:
-      - MoSProver (quantum side): extracts heavy Fourier coefficients
-      - MoSVerifier (classical side): verifies the list and builds hypothesis
-      - ClassicalExampleOracle: provides random examples to verifier
+    outcome: VerificationOutcome
+    hypothesis: Optional[Union[ParityHypothesis, FourierSparseHypothesis]]
+    hypothesis_type: Optional[HypothesisType]
+    verifier_estimates: dict[int, float]
+    accumulated_weight: float
+    acceptance_threshold: float
+    list_received: list[int]
+    list_size_bound: int
+    n: int
+    epsilon: float
+    num_classical_samples: int
+
+    @property
+    def accepted(self) -> bool:
+        return self.outcome == VerificationOutcome.ACCEPT
+
+    def summary(self) -> str:
+        """Human-readable summary."""
+        lines = [
+            f"Verification Result — {self.outcome.value}",
+            f"  n = {self.n}, epsilon = {self.epsilon:.4f}",
+            f"  |L| = {len(self.list_received)} (bound: {self.list_size_bound})",
+            f"  Accumulated weight: {self.accumulated_weight:.6f}",
+            f"  Acceptance threshold: {self.acceptance_threshold:.6f}",
+            f"  Classical samples used: {self.num_classical_samples}",
+        ]
+        if self.accepted and self.hypothesis is not None:
+            if isinstance(self.hypothesis, ParityHypothesis):
+                bits = format(self.hypothesis.s, f"0{self.n}b")
+                lines.append(
+                    f"  Hypothesis: parity s={self.hypothesis.s} ({bits}), "
+                    f"est coeff={self.hypothesis.estimated_coefficient:+.6f}"
+                )
+            elif isinstance(self.hypothesis, FourierSparseHypothesis):
+                lines.append(
+                    f"  Hypothesis: Fourier-sparse with "
+                    f"{len(self.hypothesis.coefficients)} terms"
+                )
+        return "\n".join(lines)
+
+
+# ===================================================================
+# Verifier
+# ===================================================================
+
+
+class MoSVerifier:
+    r"""
+    Classical verifier for the interactive quantum learning protocol.
+
+    Implements the verifier side of the verification protocols from §6
+    of Caro et al. (ITCS 2024).  The verifier has access to classical
+    random examples from the distribution :math:`D` (obtained by
+    computational-basis measurement of :math:`\rho_D`, per Lemma 1)
+    and interacts with a (potentially dishonest) quantum prover.
+
+    The verifier's checks are sufficient to guarantee:
+
+    - **Completeness** (Theorems 8/12): when interacting with the honest
+      prover, the verifier accepts and outputs a good hypothesis with
+      probability :math:`\geq 1 - \delta`.
+
+    - **Soundness** (information-theoretic): even against a computationally
+      unbounded dishonest prover, if the verifier accepts, the output
+      hypothesis satisfies the agnostic learning guarantee.
 
     Parameters
     ----------
-    simulator : MoSSimulator
-        The MoS quantum simulator.
-    phi : np.ndarray
-        The conditional probability function (also given to oracle).
-    weight_interval : (float, float)
-        A priori known interval [a^2, b^2] for sum_s hat{tilde_phi}(s)^2.
-        This models the restricted distribution class D from the paper.
-        If None, it's computed from the true phi (for simulation/testing).
+    mos_state : MoSState
+        The MoS state encoding the distribution :math:`D`.  The verifier
+        uses this only to draw classical random examples via
+        computational-basis measurement (:meth:`MoSState.sample_classical_batch`).
     seed : int, optional
-        Random seed.
+        Random seed for reproducibility.
+
+    Notes
+    -----
+    In a real deployment, the verifier would have access only to a
+    classical random example oracle — not to the full MoSState.  Here
+    we pass the MoSState to enable classical sampling (Lemma 1), which
+    is the verifier's only use of it.
     """
 
     def __init__(
         self,
-        simulator,
-        phi: np.ndarray,
-        weight_interval: Optional[Tuple[float, float]] = None,
+        mos_state: MoSState,
         seed: Optional[int] = None,
-        prover_simulator=None,
     ):
-        self.sim = simulator
-        self.n = simulator.n
-        self.phi = np.asarray(phi, dtype=np.float64)
+        self.state = mos_state
+        self.n = mos_state.n
+        self._seed = seed
+        self._rng: Generator = default_rng(seed)
 
-        rng = default_rng(seed)
-        seeds = rng.integers(0, 2**31, size=3)
+    # ------------------------------------------------------------------
+    # Main verification entry points
+    # ------------------------------------------------------------------
 
-        # Import prover here to avoid circular dependency at module level
-        from ql.prover import MoSProver
-
-        # If a separate prover simulator is given (e.g. oracle mismatch or
-        # noisy prover), the prover uses that; otherwise it uses the same
-        # simulator as the verifier's ground truth.
-        prover_sim = prover_simulator if prover_simulator is not None else simulator
-        self.prover = MoSProver(prover_sim, seed=int(seeds[0]))
-
-        # The verifier always uses the *true* phi
-        self.oracle = ClassicalExampleOracle(
-            self.n, self.phi, seed=int(seeds[1])
-        )
-        self.verifier = MoSVerifier(self.oracle, self.n)
-
-        # Compute or use provided weight interval
-        if weight_interval is not None:
-            self.weight_interval = weight_interval
-        else:
-            self.weight_interval = self._compute_true_weight_interval()
-
-        self._eval_rng_seed = int(seeds[2])
-
-    def _compute_true_weight_interval(
+    def verify_parity(
         self,
-        margin: float = 0.05
-    ) -> Tuple[float, float]:
-        """
-        Compute the true total squared Fourier weight and return an interval.
-
-        In practice, this interval comes from the distribution class promise.
-        For simulation, we compute it from the true phi and add a small margin.
-        """
-        tilde_phi = 2 * self.phi - 1
-        total_weight = float(np.mean(tilde_phi ** 2))
-        lower = max(0.0, total_weight - margin)
-        upper = min(1.0, total_weight + margin)
-        return (lower, upper)
-
-    def run(
-        self,
-        epsilon: float = 0.1,
-        delta: float = 0.05,
+        prover_message: ProverMessage,
+        epsilon: float,
+        delta: float = 0.1,
         theta: Optional[float] = None,
-        prover_copies: int = 50000,
-        prover_method: str = "auto",
-        prover_mode: str = "statevector",
-        verifier_samples_per_coeff: Optional[int] = None,
-        **prover_kwargs,
-    ) -> ProtocolTranscript:
-        """
-        Execute the full interactive protocol.
+        a_sq: float = 1.0,
+        b_sq: float = 1.0,
+        num_samples: Optional[int] = None,
+    ) -> VerificationResult:
+        r"""
+        Verify agnostic parity learning (Theorems 7/8/11/12).
+
+        Implements the verifier's protocol for 1-agnostic proper
+        parity verification.
+
+        **Protocol steps** (Theorems 8/12):
+
+        1. Receive :math:`L` from prover; reject if :math:`|L| > 64b^2/\vartheta^2`.
+        2. Estimate :math:`\hat{\tilde\phi}(s)` for each :math:`s \in L`
+           using classical random examples.
+        3. Check :math:`\sum_{s \in L} \hat\xi(s)^2 \geq a^2 - \varepsilon^2/8`.
+        4. Output :math:`h(x) = s_{\text{out}} \cdot x` where
+           :math:`s_{\text{out}} = \arg\max_{s \in L} |\hat\xi(s)|`.
 
         Parameters
         ----------
+        prover_message : ProverMessage
+            The message received from the (potentially dishonest) prover.
         epsilon : float
-            Learning accuracy parameter.
+            Accuracy parameter :math:`\varepsilon \in (0, 1)`.
+        delta : float
+            Confidence parameter :math:`\delta \in (0, 1)`.
+        theta : float, optional
+            Fourier resolution threshold :math:`\vartheta`.
+            Defaults to ``epsilon``.
+        a_sq : float
+            Lower bound on :math:`\mathbb{E}[\tilde\phi(x)^2]`
+            (Definition 14).  For the functional case, :math:`a^2 = 1`.
+            For the distributional case with noise rate :math:`\eta`,
+            :math:`a^2 = (1 - 2\eta)^2`.
+        b_sq : float
+            Upper bound on :math:`\mathbb{E}[\tilde\phi(x)^2]`
+            (Definition 14).  For the functional case, :math:`b^2 = 1`.
+        num_samples : int, optional
+            Override the number of classical samples.  If not provided,
+            computed from the Hoeffding bound.
+
+        Returns
+        -------
+        VerificationResult
+        """
+        if theta is None:
+            theta = epsilon
+
+        return self._verify_core(
+            prover_message=prover_message,
+            epsilon=epsilon,
+            delta=delta,
+            theta=theta,
+            a_sq=a_sq,
+            b_sq=b_sq,
+            hypothesis_type=HypothesisType.PARITY,
+            k=None,
+            num_samples=num_samples,
+        )
+
+    def verify_fourier_sparse(
+        self,
+        prover_message: ProverMessage,
+        epsilon: float,
+        k: int,
+        delta: float = 0.1,
+        theta: Optional[float] = None,
+        a_sq: float = 1.0,
+        b_sq: float = 1.0,
+        num_samples: Optional[int] = None,
+    ) -> VerificationResult:
+        r"""
+        Verify agnostic Fourier-sparse learning (Theorems 9/10/14/15).
+
+        Implements the verifier's protocol for 2-agnostic improper
+        Fourier-:math:`k`-sparse verification.
+
+        **Protocol steps** (Theorems 10/15):
+
+        1. Receive :math:`L` from prover; reject if :math:`|L| > 64b^2/\vartheta^2`.
+        2. Estimate :math:`\hat{\tilde\phi}(s)` for each :math:`s \in L`.
+        3. Check :math:`\sum_{s \in L} \hat\xi(s)^2 \geq a^2 - \varepsilon^2/(128k^2)`.
+        4. Pick :math:`k` heaviest from :math:`L`, build randomised hypothesis
+           per Lemma 14.
+
+        Parameters
+        ----------
+        prover_message : ProverMessage
+            The message received from the prover.
+        epsilon : float
+            Accuracy parameter.
+        k : int
+            Fourier sparsity parameter (number of terms).
         delta : float
             Confidence parameter.
         theta : float, optional
-            Heaviness threshold. Default: epsilon^2 / 4 (sufficient for
-            the agnostic guarantee).
-        prover_copies : int
-            MoS copies for the prover.
-        prover_method : str
-            Prover extraction method ("threshold", "gl", "auto").
-        prover_mode : str
-            Simulation mode for Hadamard measurements.
-        verifier_samples_per_coeff : int, optional
-            Classical samples per Fourier coefficient for verifier.
-        prover_kwargs : dict
-            Additional arguments passed to the prover.
+            Fourier resolution threshold.  Defaults to ``epsilon``.
+        a_sq : float
+            Lower bound on :math:`\mathbb{E}[\tilde\phi^2]`.
+        b_sq : float
+            Upper bound on :math:`\mathbb{E}[\tilde\phi^2]`.
+        num_samples : int, optional
+            Override the number of classical samples.
 
         Returns
         -------
-        transcript : ProtocolTranscript
+        VerificationResult
         """
         if theta is None:
-            theta = epsilon ** 2 / 4
+            theta = epsilon
 
-        # ============================================================
-        # ROUND 1: Prover extracts heavy coefficients and sends list L
-        # ============================================================
-        prover_result = self.prover.extract_heavy_coefficients(
-            theta=theta,
-            num_copies=prover_copies,
-            method=prover_method,
-            mode=prover_mode,
-            **prover_kwargs,
-        )
-
-        prover_list = prover_result.heavy_list
-        prover_weights = prover_result.heavy_weights
-
-        # ============================================================
-        # ROUND 2: Verifier checks the list using classical examples
-        # ============================================================
-        verifier_result = self.verifier.verify(
-            prover_list=prover_list,
-            weight_interval=self.weight_interval,
-            epsilon=epsilon,
-            delta=delta,
-            samples_per_coefficient=verifier_samples_per_coeff,
-        )
-
-        # ============================================================
-        # OUTPUT: Build hypothesis if accepted
-        # ============================================================
-        hypothesis = None
-        if verifier_result.decision == VerificationDecision.ACCEPT:
-            hypothesis = verifier_result.hypothesis_coefficients
-
-        return ProtocolTranscript(
-            n=self.n,
+        return self._verify_core(
+            prover_message=prover_message,
             epsilon=epsilon,
             delta=delta,
             theta=theta,
-            prover_list=prover_list,
-            prover_weights=prover_weights,
-            verifier_result=verifier_result,
-            hypothesis=hypothesis,
+            a_sq=a_sq,
+            b_sq=b_sq,
+            hypothesis_type=HypothesisType.FOURIER_SPARSE,
+            k=k,
+            num_samples=num_samples,
         )
 
-    def evaluate_hypothesis(
+    # ------------------------------------------------------------------
+    # Core verification logic
+    # ------------------------------------------------------------------
+
+    def _verify_core(
         self,
-        transcript: ProtocolTranscript,
-        num_samples: int = 50000,
-    ) -> Optional[Dict]:
+        prover_message: ProverMessage,
+        epsilon: float,
+        delta: float,
+        theta: float,
+        a_sq: float,
+        b_sq: float,
+        hypothesis_type: HypothesisType,
+        k: Optional[int],
+        num_samples: Optional[int],
+    ) -> VerificationResult:
+        r"""
+        Core verification protocol shared by parity and Fourier-sparse modes.
+
+        Follows the structure of Theorems 8/10/12/15 in §6.
         """
-        Evaluate the hypothesis produced by the protocol.
+        n = self.n
+        L = prover_message.L
+
+        # ---- Step 1: Validate list size (§6, Step 3) ----
+        # Parseval bound: |L| <= 16 * E[tilde_phi^2] / theta^2 <= 16*b^2 / theta^2
+        # The proofs in §6.3 use 64*b^2/theta^2 to accommodate the factor
+        # of 4 from working with theta/2 resolution in Corollary 5.
+        list_size_bound = int(np.ceil(64.0 * b_sq / theta**2))
+
+        if len(L) > list_size_bound:
+            return VerificationResult(
+                outcome=VerificationOutcome.REJECT_LIST_TOO_LARGE,
+                hypothesis=None,
+                hypothesis_type=None,
+                verifier_estimates={},
+                accumulated_weight=0.0,
+                acceptance_threshold=0.0,
+                list_received=L,
+                list_size_bound=list_size_bound,
+                n=n,
+                epsilon=epsilon,
+                num_classical_samples=0,
+            )
+
+        # ---- Step 2: Estimate Fourier coefficients independently ----
+        # The verifier uses its OWN classical samples — this is the key
+        # to information-theoretic soundness.
+        L_size = len(L)
+
+        if hypothesis_type == HypothesisType.PARITY:
+            # Theorem 12, Step 3: tolerance eps^2 / (16 * |L|)
+            per_coeff_tolerance = epsilon**2 / (16.0 * max(L_size, 1))
+        else:
+            # Theorem 15, Step 3: tolerance eps^2 / (256 * k^2 * |L|)
+            per_coeff_tolerance = epsilon**2 / (256.0 * k**2 * max(L_size, 1))
+
+        if num_samples is None:
+            # Hoeffding: P[|mean - E| > tol] <= 2*exp(-2*m*tol^2/4)
+            # Want this <= delta / (2 * |L|) for union bound.
+            # => m >= (2 / tol^2) * log(4 * |L| / delta)
+            if L_size > 0:
+                num_samples = int(
+                    np.ceil(2.0 / per_coeff_tolerance**2 * np.log(4.0 * L_size / delta))
+                )
+                num_samples = max(num_samples, 100)
+            else:
+                num_samples = 0
+
+        verifier_estimates = self._estimate_coefficients_independently(
+            L=L,
+            num_samples=num_samples,
+        )
+
+        # ---- Step 3: Check accumulated Fourier weight ----
+        accumulated_weight = sum(verifier_estimates.get(s, 0.0) ** 2 for s in L)
+
+        if hypothesis_type == HypothesisType.PARITY:
+            # Theorem 12, Step 4: threshold a^2 - eps^2/8
+            acceptance_threshold = a_sq - epsilon**2 / 8.0
+        else:
+            # Theorem 15, Step 4: threshold a^2 - eps^2/(128*k^2)
+            acceptance_threshold = a_sq - epsilon**2 / (128.0 * k**2)
+
+        if accumulated_weight < acceptance_threshold:
+            return VerificationResult(
+                outcome=VerificationOutcome.REJECT_INSUFFICIENT_WEIGHT,
+                hypothesis=None,
+                hypothesis_type=None,
+                verifier_estimates=verifier_estimates,
+                accumulated_weight=accumulated_weight,
+                acceptance_threshold=acceptance_threshold,
+                list_received=L,
+                list_size_bound=list_size_bound,
+                n=n,
+                epsilon=epsilon,
+                num_classical_samples=num_samples,
+            )
+
+        # ---- Step 4: Construct hypothesis ----
+        if hypothesis_type == HypothesisType.PARITY:
+            hypothesis = self._build_parity_hypothesis(L, verifier_estimates)
+        else:
+            hypothesis = self._build_fourier_sparse_hypothesis(L, verifier_estimates, k)
+
+        return VerificationResult(
+            outcome=VerificationOutcome.ACCEPT,
+            hypothesis=hypothesis,
+            hypothesis_type=hypothesis_type,
+            verifier_estimates=verifier_estimates,
+            accumulated_weight=accumulated_weight,
+            acceptance_threshold=acceptance_threshold,
+            list_received=L,
+            list_size_bound=list_size_bound,
+            n=n,
+            epsilon=epsilon,
+            num_classical_samples=num_samples,
+        )
+
+    # ------------------------------------------------------------------
+    # Independent coefficient estimation (verifier's own classical data)
+    # ------------------------------------------------------------------
+
+    def _estimate_coefficients_independently(
+        self,
+        L: list[int],
+        num_samples: int,
+    ) -> dict[int, float]:
+        r"""
+        Estimate Fourier coefficients using the verifier's own classical
+        random examples — independent of the prover.
+
+        For each :math:`s \in L`:
+
+        .. math::
+
+            \hat\xi(s) = \frac{1}{m} \sum_{i=1}^{m}
+            (1 - 2y_i)(-1)^{s \cdot x_i}
+
+        where :math:`(x_i, y_i) \sim D` are i.i.d. classical samples.
+
+        This independence is the foundation of information-theoretic
+        soundness: the verifier's estimates are uncontaminated by
+        anything the prover does.
+
+        Parameters
+        ----------
+        L : list[int]
+            Frequency indices to estimate.
+        num_samples : int
+            Number of classical samples to draw.
 
         Returns
         -------
-        evaluation : dict or None
-            None if the protocol rejected (no hypothesis).
-            Otherwise dict with risk, excess risk, etc.
+        estimates : dict[int, float]
+            The verifier's independent estimates.
         """
-        if transcript.hypothesis is None:
-            return None
+        if len(L) == 0 or num_samples == 0:
+            return {s: 0.0 for s in L}
 
-        h = FourierHypothesis(self.n, transcript.hypothesis)
-        eval_oracle = ClassicalExampleOracle(
-            self.n, self.phi, seed=self._eval_rng_seed
+        # Draw classical samples from D (Lemma 1)
+        xs, ys = self.state.sample_classical_batch(
+            num_samples=num_samples,
+            rng=self._rng,
         )
 
-        risk = h.evaluate_risk(eval_oracle, num_samples)
+        # Compute signed labels: (1 - 2y)
+        signed_labels = 1.0 - 2.0 * ys.astype(np.float64)
 
-        # Compute best parity risk for comparison
-        tilde_phi = 2 * self.phi - 1
-        best_parity_risk = 1.0
-        best_s = 0
-        dim_x = 2 ** self.n
-        for s in range(dim_x):
-            # Risk of parity chi_s (mapped to {0,1}):
-            # Pr[chi_s(x) != y] = (1 - hat{tilde_phi}(s)) / 2
-            fc = self.sim.fourier_coefficient(s)
-            parity_risk = (1 - abs(fc)) / 2
-            if parity_risk < best_parity_risk:
-                best_parity_risk = parity_risk
-                best_s = s
+        estimates: dict[int, float] = {}
+        for s in L:
+            # chi_s(x) = (-1)^{popcount(s & x)}
+            parities = np.array(
+                [bin(s & int(x)).count("1") % 2 for x in xs],
+                dtype=np.float64,
+            )
+            chi_s = 1.0 - 2.0 * parities
+            est = float(np.mean(signed_labels * chi_s))
+            est = np.clip(est, -1.0, 1.0)
+            estimates[s] = est
 
-        excess_risk = risk - best_parity_risk
+        return estimates
 
-        return {
-            'risk': risk,
-            'best_parity_risk': best_parity_risk,
-            'best_parity_s': best_s,
-            'excess_risk': excess_risk,
-            'epsilon': transcript.epsilon,
-            'agnostic_bound_met': excess_risk <= transcript.epsilon + 0.02,
-        }
+    # ------------------------------------------------------------------
+    # Hypothesis construction
+    # ------------------------------------------------------------------
+
+    def _build_parity_hypothesis(
+        self,
+        L: list[int],
+        verifier_estimates: dict[int, float],
+    ) -> ParityHypothesis:
+        r"""
+        Build parity hypothesis :math:`h(x) = s_{\text{out}} \cdot x`
+        where :math:`s_{\text{out}} = \arg\max_{s \in L} |\hat\xi(s)|`.
+
+        This is Step 4 of Theorems 7/8/11/12.
+        """
+        if not L:
+            # Degenerate case: empty list passed checks (shouldn't happen
+            # with sensible parameters, but handle gracefully)
+            return ParityHypothesis(s=0, n=self.n, estimated_coefficient=0.0)
+
+        s_out = max(L, key=lambda s: abs(verifier_estimates.get(s, 0.0)))
+        return ParityHypothesis(
+            s=s_out,
+            n=self.n,
+            estimated_coefficient=verifier_estimates.get(s_out, 0.0),
+        )
+
+    def _build_fourier_sparse_hypothesis(
+        self,
+        L: list[int],
+        verifier_estimates: dict[int, float],
+        k: int,
+    ) -> FourierSparseHypothesis:
+        r"""
+        Build Fourier-sparse randomised hypothesis per Lemma 14.
+
+        Pick :math:`k` heaviest from :math:`L` (by :math:`|\hat\xi(s)|`),
+        construct :math:`g(x) = \sum_{\ell=1}^{k} \hat\xi(s_\ell) \chi_{s_\ell}(x)`.
+
+        This is Step 4 of Theorems 9/10/14/15.
+        """
+        # Sort L by |estimated coefficient| descending
+        sorted_L = sorted(
+            L, key=lambda s: abs(verifier_estimates.get(s, 0.0)), reverse=True
+        )
+
+        # Take the k heaviest
+        top_k = sorted_L[:k]
+
+        coefficients = {s: verifier_estimates.get(s, 0.0) for s in top_k}
+
+        return FourierSparseHypothesis(coefficients=coefficients, n=self.n)
+
+    # ------------------------------------------------------------------
+    # Convenience: full protocol (prover + verifier)
+    # ------------------------------------------------------------------
+
+    def run_full_protocol(
+        self,
+        prover_message: ProverMessage,
+        mode: str = "parity",
+        epsilon: Optional[float] = None,
+        delta: float = 0.1,
+        theta: Optional[float] = None,
+        k: int = 1,
+        a_sq: float = 1.0,
+        b_sq: float = 1.0,
+        num_samples: Optional[int] = None,
+    ) -> VerificationResult:
+        r"""
+        Run the full verification given a prover message.
+
+        Convenience wrapper that dispatches to :meth:`verify_parity`
+        or :meth:`verify_fourier_sparse`.
+
+        Parameters
+        ----------
+        prover_message : ProverMessage
+            The prover's message.
+        mode : str
+            ``"parity"`` or ``"fourier_sparse"``.
+        epsilon : float, optional
+            Accuracy parameter.  Defaults to the prover's epsilon.
+        delta : float
+            Confidence parameter.
+        theta : float, optional
+            Fourier resolution threshold.
+        k : int
+            Fourier sparsity (only used in ``"fourier_sparse"`` mode).
+        a_sq : float
+            Lower bound on :math:`\mathbb{E}[\tilde\phi^2]`.
+        b_sq : float
+            Upper bound on :math:`\mathbb{E}[\tilde\phi^2]`.
+        num_samples : int, optional
+            Override classical sample count.
+
+        Returns
+        -------
+        VerificationResult
+        """
+        if epsilon is None:
+            epsilon = prover_message.epsilon
+
+        if mode == "parity":
+            return self.verify_parity(
+                prover_message=prover_message,
+                epsilon=epsilon,
+                delta=delta,
+                theta=theta,
+                a_sq=a_sq,
+                b_sq=b_sq,
+                num_samples=num_samples,
+            )
+        elif mode == "fourier_sparse":
+            return self.verify_fourier_sparse(
+                prover_message=prover_message,
+                epsilon=epsilon,
+                k=k,
+                delta=delta,
+                theta=theta,
+                a_sq=a_sq,
+                b_sq=b_sq,
+                num_samples=num_samples,
+            )
+        else:
+            raise ValueError(
+                f"Unknown mode {mode!r}; expected 'parity' or 'fourier_sparse'"
+            )
