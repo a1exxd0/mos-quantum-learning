@@ -64,6 +64,12 @@ class TrialSpec:
     #: ``"random_list"``, ``"wrong_parity"``, ``"partial_list"``, or
     #: ``"inflated_list"``.
     dishonest_strategy: Optional[str] = None
+    #: Gate-level depolarising noise rate :math:`p`.  When set, the
+    #: worker constructs a Qiskit ``NoiseModel`` with depolarising
+    #: channels on H, X (1-qubit) and CX (2-qubit) gates.
+    gate_noise_rate: Optional[float] = None
+    #: QFS simulation mode passed to ``MoSProver.run_protocol``.
+    qfs_mode: str = "statevector"
 
 
 def _run_trial_worker(spec: TrialSpec) -> TrialResult:
@@ -102,13 +108,27 @@ def _run_trial_worker(spec: TrialSpec) -> TrialResult:
     if spec.dishonest_strategy is not None:
         return _run_dishonest_trial(spec, state)
 
+    # --- Build gate-level noise model (if requested) ---
+    noise_model = None
+    if spec.gate_noise_rate is not None and spec.gate_noise_rate > 0:
+        from qiskit_aer.noise import NoiseModel, depolarizing_error
+
+        noise_model = NoiseModel()
+        noise_model.add_all_qubit_quantum_error(
+            depolarizing_error(spec.gate_noise_rate, 1), ["h", "x"]
+        )
+        noise_model.add_all_qubit_quantum_error(
+            depolarizing_error(spec.gate_noise_rate, 2), ["cx"]
+        )
+
     # --- Prover ---
     t0 = time.time()
-    prover = MoSProver(state, seed=spec.seed)
+    prover = MoSProver(state, seed=spec.seed, noise_model=noise_model)
     msg = prover.run_protocol(
         epsilon=spec.epsilon,
         delta=spec.delta,
         theta=spec.theta,
+        qfs_mode=spec.qfs_mode,
         qfs_shots=spec.qfs_shots,
         classical_samples=spec.classical_samples_prover,
     )
