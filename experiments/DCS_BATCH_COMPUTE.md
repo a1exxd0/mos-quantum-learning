@@ -2,7 +2,7 @@
 
 ## Overview
 - Uses **SLURM** job scheduling system
-- Head node: `kudu-taught` (PGR: `kudu-staffpgr`)
+- Head node: `kudu-taught`
 - Jobs are queued when nodes are busy
 
 ---
