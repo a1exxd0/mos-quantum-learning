@@ -24,3 +24,7 @@ echo "Merging results/${PATTERN}_shard*.pb -> results/${OUTPUT}.pb"
 python -m experiments.harness merge \
     results/${PATTERN}_shard*.pb \
     -o "results/${OUTPUT}.pb"
+
+echo "Removing shard files..."
+rm -f results/${PATTERN}_shard*.pb
+echo "Done."
