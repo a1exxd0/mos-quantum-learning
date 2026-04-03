@@ -5,6 +5,7 @@
 # Artifacts
 *.egg-info/
 slurm_logs/
+.claude/
 
 # Python cache
 __pycache__/
