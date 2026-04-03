@@ -8,6 +8,9 @@ uv sync
 
 Always use Context7 when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
 
+If you are logged into thhe `kudu-taught` server, you have access to DCS batch compute. Use `experiments/DCS_BATCH_COMPUTE.md` to find information 
+about how to use the batch compute system.
+
 # Run tests
 Use parallel workers matching the computer's core count:
 ```sh
