@@ -20,6 +20,8 @@ def run_truncation_experiment(
     classical_samples_prover: int = 1000,
     base_seed: int = 42,
     max_workers: int = 1,
+    shard_index: int | None = None,
+    num_shards: int | None = None,
 ) -> ExperimentResult:
     r"""Verifier truncation tradeoff experiment.
 
@@ -110,7 +112,10 @@ def run_truncation_experiment(
                 )
 
     t0 = time.time()
-    trials = run_trials_parallel(specs, max_workers=max_workers, label="trunc")
+    trials = run_trials_parallel(
+        specs, max_workers=max_workers, label="trunc",
+        shard_index=shard_index, num_shards=num_shards,
+    )
     wall = time.time() - t0
 
     result = ExperimentResult(

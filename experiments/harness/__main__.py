@@ -4,6 +4,14 @@ Usage::
 
     python -m experiments.harness scaling --n-min 4 --n-max 12 --workers 8
     python -m experiments.harness all --n-min 4 --n-max 12 --workers 4
+
+SLURM distributed execution::
+
+    python -m experiments.harness scaling --n-min 4 --n-max 16 --workers 32 \\
+        --shard-index $SLURM_ARRAY_TASK_ID --num-shards 8
+
+    python -m experiments.harness merge results/scaling_4_16_20_shard*.pb \\
+        -o results/scaling_4_16_20.pb
 """
 
 import time
@@ -36,6 +44,34 @@ def _add_common_args(parser: argparse.ArgumentParser):
         "--output-dir", type=str, default="results", help="Output directory"
     )
     parser.add_argument("--seed", type=int, default=42, help="Base random seed")
+    parser.add_argument(
+        "--shard-index",
+        type=int,
+        default=None,
+        help="0-based shard index for SLURM Job Array distribution (requires --num-shards)",
+    )
+    parser.add_argument(
+        "--num-shards",
+        type=int,
+        default=None,
+        help="Total number of shards for SLURM Job Array distribution (requires --shard-index)",
+    )
+
+
+def _output_path(output_dir: Path, base_name: str, args) -> str:
+    """Build an output path, appending a shard suffix when sharding is active."""
+    if args.num_shards is not None:
+        from experiments.harness.sharding import shard_output_path
+
+        return shard_output_path(
+            str(output_dir / f"{base_name}.pb"), args.shard_index, args.num_shards
+        )
+    return str(output_dir / f"{base_name}.pb")
+
+
+def _shard_kwargs(args) -> dict:
+    """Extract shard keyword arguments from parsed CLI args."""
+    return {"shard_index": args.shard_index, "num_shards": args.num_shards}
 
 
 def _run_scaling(args):
@@ -45,8 +81,9 @@ def _run_scaling(args):
         num_trials=args.trials,
         base_seed=args.seed,
         max_workers=args.workers,
+        **_shard_kwargs(args),
     )
-    r.save(str(output_dir / f"scaling_{args.n_min}_{args.n_max}_{args.trials}.pb"))
+    r.save(_output_path(output_dir, f"scaling_{args.n_min}_{args.n_max}_{args.trials}", args))
     return [r]
 
 
@@ -59,8 +96,9 @@ def _run_bent(args):
         num_trials=args.trials,
         base_seed=args.seed,
         max_workers=args.workers,
+        **_shard_kwargs(args),
     )
-    r.save(str(output_dir / f"bent_{bent_min}_{bent_max}_{args.trials}.pb"))
+    r.save(_output_path(output_dir, f"bent_{bent_min}_{bent_max}_{args.trials}", args))
     return [r]
 
 
@@ -72,8 +110,9 @@ def _run_truncation(args):
         num_trials=args.trials,
         base_seed=args.seed,
         max_workers=args.workers,
+        **_shard_kwargs(args),
     )
-    r.save(str(output_dir / f"truncation_{fixed_n}_{fixed_n}_{args.trials}.pb"))
+    r.save(_output_path(output_dir, f"truncation_{fixed_n}_{fixed_n}_{args.trials}", args))
     return [r]
 
 
@@ -84,8 +123,9 @@ def _run_noise(args):
         num_trials=args.trials,
         base_seed=args.seed,
         max_workers=args.workers,
+        **_shard_kwargs(args),
     )
-    r.save(str(output_dir / f"noise_sweep_{args.n_min}_{args.n_max}_{args.trials}.pb"))
+    r.save(_output_path(output_dir, f"noise_sweep_{args.n_min}_{args.n_max}_{args.trials}", args))
     return [r]
 
 
@@ -97,8 +137,9 @@ def _run_soundness(args):
         num_trials=soundness_trials,
         base_seed=args.seed,
         max_workers=args.workers,
+        **_shard_kwargs(args),
     )
-    r.save(str(output_dir / f"soundness_{args.n_min}_{args.n_max}_{soundness_trials}.pb"))
+    r.save(_output_path(output_dir, f"soundness_{args.n_min}_{args.n_max}_{soundness_trials}", args))
     return [r]
 
 
@@ -109,8 +150,9 @@ def _run_average_case(args):
         num_trials=args.trials,
         base_seed=args.seed,
         max_workers=args.workers,
+        **_shard_kwargs(args),
     )
-    r.save(str(output_dir / f"average_case_{args.n_min}_{args.n_max}_{args.trials}.pb"))
+    r.save(_output_path(output_dir, f"average_case_{args.n_min}_{args.n_max}_{args.trials}", args))
     return [r]
 
 
@@ -121,9 +163,17 @@ def _run_gate_noise(args):
         num_trials=args.trials,
         base_seed=args.seed,
         max_workers=args.workers,
+        **_shard_kwargs(args),
     )
-    r.save(str(output_dir / f"gate_noise_{args.n_min}_{args.n_max}_{args.trials}.pb"))
+    r.save(_output_path(output_dir, f"gate_noise_{args.n_min}_{args.n_max}_{args.trials}", args))
     return [r]
+
+
+def _run_merge(args):
+    from experiments.harness.sharding import merge_shard_files
+
+    merge_shard_files(args.shards, args.output)
+    return []
 
 
 def _run_all(args):
@@ -190,7 +240,31 @@ def main():
         help="Fixed n for the truncation experiment. Defaults to n-min.",
     )
 
+    # --- merge ---
+    sp = subparsers.add_parser(
+        "merge", help="Merge sharded experiment result files"
+    )
+    sp.add_argument(
+        "shards", nargs="+", type=Path, help="Shard .pb files to merge"
+    )
+    sp.add_argument(
+        "-o", "--output", type=Path, required=True, help="Output merged .pb file"
+    )
+
     args = parser.parse_args()
+
+    # Validate shard flags (not applicable to merge)
+    if args.command != "merge":
+        if (args.shard_index is None) != (args.num_shards is None):
+            parser.error("--shard-index and --num-shards must be used together")
+        if args.num_shards is not None:
+            if args.num_shards < 1:
+                parser.error("--num-shards must be >= 1")
+            if not (0 <= args.shard_index < args.num_shards):
+                parser.error(
+                    f"--shard-index must be in [0, {args.num_shards}), "
+                    f"got {args.shard_index}"
+                )
 
     # Dispatch table
     dispatch = {
@@ -202,11 +276,15 @@ def main():
         "average_case": _run_average_case,
         "gate_noise": _run_gate_noise,
         "all": _run_all,
+        "merge": _run_merge,
     }
 
     t_total = time.time()
     experiments = dispatch[args.command](args)
     wall_total = time.time() - t_total
+
+    if args.command == "merge":
+        return
 
     output_dir = Path(args.output_dir)
     print(f"\n{'=' * 60}")
