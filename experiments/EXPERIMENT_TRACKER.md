@@ -112,31 +112,160 @@ honest baseline.
 
 ---
 
-## Missing Experiments
+## Pending Experiments
 
 ### Exp 3 -- Gate-Level Noise (Depolarising via Qiskit NoiseModel)
-- **Module:** Not implemented.
-- **What's needed:**
-  1. Integrate Qiskit's `NoiseModel` with depolarising channels on H, X,
-     CX gates into the MoS simulator (currently the simulator only
-     supports label-flip noise via phi manipulation).
-  2. Sweep depolarising error rate p and record accept/reject outcomes.
-  3. This goes beyond existing theory (Caro et al. and Ma--Su--Deng
-     analyse label-flip / oracle-level noise, not gate-level noise),
-     so there is no theoretical prediction to compare against -- the
-     result is inherently empirical and novel.
-- **Effort estimate:** Medium. Requires adding a `NoiseModel` execution
-  path in `mos/sampler.py` or a wrapper, plus a new experiment harness
-  module and proto schema.
+- **Module:** `experiments/harness/gate_noise.py`
+- **Result file:** `results/gate_noise_{n_min}_{n_max}_{trials}.pb`
+- **Coverage:** n=4..6, gate error rate p in
+  {0.0, 0.001, 0.005, 0.01, 0.02, 0.05, 0.1}, 24 trials per (n, p) cell.
+  Uses depolarising channels on H, X, CX gates via Qiskit `NoiseModel`.
+  Protocol run with a² = b² = 1 (noiseless promise), θ = ε = 0.3
+  (no noise-adaptive threshold), 2000 QFS shots, 1000 prover samples,
+  3000 verifier samples. Target functions are random single parities
+  (same as Exp 2 for direct comparison).
+- **Status:** NOT YET RUN. Module and proto schema implemented; awaiting
+  execution.
+
+#### Theoretical Context
+
+Caro et al. (arXiv:2306.04843, §4.2) analyse three noise models for
+quantum Fourier sampling, all operating at the distribution/label level:
+
+- **Lemma 4** (mixed noisy functional examples): QFS distribution is
+  *identical* to the noiseless case — noise has no effect.
+- **Lemma 5** (pure η-noisy examples): Post-selection probability drops
+  from 1/2 to 1/2 − √((1−η)η), but conditional Fourier distribution
+  is unchanged.
+- **Lemma 6** (MoS noisy examples, Definition 5(iii)): Post-selection
+  stays at 1/2, but Fourier coefficients are attenuated by (1−2η)².
+
+The verification protocol (Theorems 11–12, §6.2) adapts to label-flip
+noise by setting the distribution class promise a² = b² = (1−2η)² and
+adjusting θ accordingly.
+
+**Gate-level depolarising noise is not covered by any of these results.**
+Depolarising channels applied to H, X, and CX gates corrupt the quantum
+state in a fundamentally different way from label-flip noise — there is
+no closed-form expression for the effective Fourier attenuation, and the
+noise does not factor cleanly into the distribution class promise. This
+makes Experiment 3 a genuinely novel empirical contribution with no
+theoretical prediction to compare against.
+
+#### Why These Noise Rates
+
+- **p = 0.0**: Baseline — circuit mode without noise. Validates that the
+  circuit pipeline itself (transpilation, MCX decomposition) does not
+  introduce artefacts.
+- **p = 0.001–0.005**: Realistic for current superconducting hardware
+  (IBM's reported 2-qubit gate error rates are ~0.5–1%). Tests whether
+  the protocol is robust to hardware-realistic noise levels.
+- **p = 0.01–0.02**: Moderate noise. Pilot data shows p=0.01 already
+  causes GL extraction to find spurious heavy Fourier coefficients
+  (|L| = 16 at n=4 vs |L| = 1 at p=0), though the protocol still
+  accepts and identifies the correct hypothesis.
+- **p = 0.05–0.1**: Heavy noise, probing the breakdown point. At n=6,
+  pilot data shows p=0.01 already causes rejection (|L| = 1, rejected),
+  so the breakdown point is somewhere below p=0.01 for n=6.
+
+#### Pilot Timing Data
+
+Single-trial timings at p=0.01 (2000 QFS shots, sequential):
+
+| n | Time/trial | |L| | Accepted | Correct |
+|---|-----------|-----|----------|---------|
+| 4 | ~40s | 16 | ✓ | ✓ |
+| 5 | ~111s | 32 | ✓ | ✓ |
+| 6 | ~227s | 1 | ✗ | ✗ |
+
+Trials at p=0.0 are faster (~17s at n=4) because the non-noise
+StatevectorSampler path avoids transpilation overhead.
+
+#### Early Observations from Pilots
+
+1. **Gate noise inflates |L|**: At n=4, p=0.01 causes |L| to jump from
+   1 (correct single parity) to 16 (all 2⁴ strings). Gate noise
+   introduces spurious apparent Fourier weight across all frequencies,
+   causing GL extraction to flag many false positives. Despite this, the
+   verifier's weight check (Step 4 of the protocol) still passes and the
+   correct hypothesis is identified.
+
+2. **Breakdown scales with n**: At n=6, even p=0.01 causes outright
+   rejection. The depolarising noise on the larger circuit (more CX gates
+   from MCX decomposition) accumulates enough error to destroy the QFS
+   signal entirely. This is qualitatively different from label-flip noise,
+   where the breakdown depends on η relative to the Fourier weight, not
+   on circuit depth.
+
+3. **Circuit depth is the key variable**: MCX gates on n qubits decompose
+   into O(n) CX gates during transpilation. Each CX gate independently
+   suffers depolarising error at rate p, so the effective error
+   accumulates with circuit depth. This suggests an effective noise
+   rate scaling roughly as p × (circuit depth), which grows with n.
+
+#### Estimated Run Times
+
+Per-cell estimates (1 trial, sequential, based on pilot data):
+
+| n | p=0 | p>0 (avg) |
+|---|-----|-----------|
+| 4 | ~17s | ~35s |
+| 5 | ~50s | ~110s |
+| 6 | ~100s | ~230s |
+
+Full run: 3 values of n × 7 noise rates × 24 trials = **504 trials**.
+
+| n | Est. serial time | With 8 workers |
+|---|------------------|----------------|
+| 4 | ~1.0h | ~8min |
+| 5 | ~3.5h | ~26min |
+| 6 | ~8.0h | ~60min |
+| **Total** | **~12.5h** | **~1.5h** |
+
+#### Execution Commands
+
+```bash
+# Full run (recommended)
+uv run python -m experiments.harness gate_noise \
+    --n-min 4 --n-max 6 --trials 24 --workers 8
+
+# Output: results/gate_noise_4_6_24.pb
+```
+
+```bash
+# Quick validation at n=4 only (~8 min with 8 workers)
+uv run python -m experiments.harness gate_noise \
+    --n-min 4 --n-max 4 --trials 24 --workers 8
+
+# Output: results/gate_noise_4_4_24.pb
+```
+
+#### Presentation Plan (Chapter 5)
+
+- **Figure 5.5**: Acceptance rate vs p for each n. Compare side-by-side
+  with the label-flip curve from Exp 2 at equivalent effective noise.
+- **Table 5.4**: Gate-noise breakdown point vs label-flip breakdown point
+  for each n.
+
+**Key claims to support:**
+
+1. Gate-level noise causes protocol failure at much lower noise rates
+   than label-flip noise, because errors accumulate with circuit depth
+   rather than attenuating Fourier coefficients uniformly.
+2. The breakdown point decreases with n (more gates → more accumulated
+   error), unlike label-flip noise where the breakdown depends on η
+   relative to θ, independent of n.
+3. At physically realistic error rates (p ≈ 0.001–0.005), the protocol
+   remains functional at small n, suggesting practical viability on
+   near-term hardware for small problem instances.
 
 ---
 
 ## Next Steps
 
-### Priority 1: Complete missing experiments
-1. **Exp 3 (gate-level noise):** Add `NoiseModel` support to the simulator
-   and write `experiments/harness/gate_noise.py`. Start with a small-n
-   sweep (n=4..6) to validate, then extend.
+### Priority 1: Run remaining experiments
+1. **Exp 3 (gate-level noise):** Module implemented. Run the full sweep
+   (n=4..6, 24 trials, 8 workers). See Exp 3 section above for commands.
 2. ~~**Exp 7 (average-case):**~~ DONE (2026-04-02). Implemented
    `make_k_sparse`, `make_random_boolean`, `make_sparse_plus_noise` in
    `phi.py` and `experiments/harness/average_case.py`.
