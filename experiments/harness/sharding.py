@@ -43,21 +43,16 @@ def shard_specs(
         The slice of specs for this shard (may be empty if
         ``num_shards > len(specs)``).
     """
-    total = len(specs)
     if num_shards <= 0:
         raise ValueError(f"num_shards must be >= 1, got {num_shards}")
     if not (0 <= shard_index < num_shards):
         raise ValueError(
             f"shard_index must be in [0, {num_shards}), got {shard_index}"
         )
-    base_size, remainder = divmod(total, num_shards)
-    if shard_index < remainder:
-        start = shard_index * (base_size + 1)
-        end = start + base_size + 1
-    else:
-        start = remainder * (base_size + 1) + (shard_index - remainder) * base_size
-        end = start + base_size
-    return specs[start:end]
+    # Round-robin assignment: shard k gets specs k, k+K, k+2K, ...
+    # This interleaves specs across shards, balancing work when specs
+    # are ordered by cost (e.g. ascending n).
+    return specs[shard_index::num_shards]
 
 
 def shard_output_path(base_path: str, shard_index: int, num_shards: int) -> str:

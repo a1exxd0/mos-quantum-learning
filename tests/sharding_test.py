@@ -108,13 +108,13 @@ class TestShardSpecs:
         assert len(s2) == 3
 
     def test_reconstruction(self):
-        """Concatenating all shards reproduces the original list."""
+        """Concatenating all shards reproduces the original set of items."""
         specs = list(range(17))
         num_shards = 4
         reconstructed = []
         for i in range(num_shards):
             reconstructed.extend(shard_specs(specs, i, num_shards))
-        assert reconstructed == specs
+        assert sorted(reconstructed) == specs
 
     def test_no_overlap(self):
         """Shards should have disjoint elements."""
@@ -147,15 +147,15 @@ class TestShardSpecs:
         assert shard_specs(specs, 3, 5) == []
         assert shard_specs(specs, 4, 5) == []
 
-    def test_contiguous_slicing(self):
-        """Shards are contiguous (not interleaved)."""
+    def test_round_robin_slicing(self):
+        """Shards are interleaved (round-robin) for balanced workloads."""
         specs = list(range(12))
         s0 = shard_specs(specs, 0, 3)
         s1 = shard_specs(specs, 1, 3)
         s2 = shard_specs(specs, 2, 3)
-        assert s0 == [0, 1, 2, 3]
-        assert s1 == [4, 5, 6, 7]
-        assert s2 == [8, 9, 10, 11]
+        assert s0 == [0, 3, 6, 9]
+        assert s1 == [1, 4, 7, 10]
+        assert s2 == [2, 5, 8, 11]
 
     def test_invalid_shard_index_raises(self):
         with pytest.raises(ValueError, match="shard_index"):
@@ -388,13 +388,13 @@ class TestShardedDeterminism:
         baseline_json = json.loads(decode(tmp_path / "scaling_baseline.pb"))
         merged_json = json.loads(decode(merged_path))
 
-        baseline_seeds = [t["seed"] for t in baseline_json["trials"]]
-        merged_seeds = [t["seed"] for t in merged_json["trials"]]
+        baseline_seeds = sorted(t["seed"] for t in baseline_json["trials"])
+        merged_seeds = sorted(t["seed"] for t in merged_json["trials"])
         assert baseline_seeds == merged_seeds
 
-        baseline_correct = [t["hypothesisCorrect"] for t in baseline_json["trials"]]
-        merged_correct = [t["hypothesisCorrect"] for t in merged_json["trials"]]
-        assert baseline_correct == merged_correct
+        baseline_by_seed = {t["seed"]: t["hypothesisCorrect"] for t in baseline_json["trials"]}
+        merged_by_seed = {t["seed"]: t["hypothesisCorrect"] for t in merged_json["trials"]}
+        assert baseline_by_seed == merged_by_seed
 
 
 # ===================================================================
