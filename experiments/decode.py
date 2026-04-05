@@ -21,6 +21,7 @@ from experiments.proto import (
     noise_sweep_pb2,
     soundness_pb2,
     gate_noise_pb2,
+    k_sparse_pb2,
 )
 
 # Maps experiment_name (from ExperimentMetadata) to its top-level proto class.
@@ -31,6 +32,7 @@ _RESULT_TYPES = {
     "noise_sweep": noise_sweep_pb2.NoiseSweepExperimentResult,
     "soundness": soundness_pb2.SoundnessExperimentResult,
     "gate_noise": gate_noise_pb2.GateNoiseExperimentResult,
+    "k_sparse": k_sparse_pb2.KSparseExperimentResult,
     "average_case": average_case_pb2.AverageCaseExperimentResult,
 }
 
@@ -43,6 +45,7 @@ _PREFIX_MAP = {
     "noise_sweep": "noise_sweep",
     "soundness": "soundness",
     "gate_noise": "gate_noise",
+    "k_sparse": "k_sparse",
     "average_case": "average_case",
 }
 
