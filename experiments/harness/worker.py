@@ -72,6 +72,10 @@ class TrialSpec:
     gate_noise_rate: Optional[float] = None
     #: QFS simulation mode passed to ``MoSProver.run_protocol``.
     qfs_mode: str = "statevector"
+    #: Fourier sparsity parameter :math:`k`.  When set and ``> 1``,
+    #: the worker calls :meth:`~ql.verifier.MoSVerifier.verify_fourier_sparse`
+    #: instead of :meth:`~ql.verifier.MoSVerifier.verify_parity`.
+    k: Optional[int] = None
 
 
 def _run_trial_worker(spec: TrialSpec) -> TrialResult:

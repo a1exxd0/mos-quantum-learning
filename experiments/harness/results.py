@@ -92,6 +92,14 @@ class TrialResult:
     b_sq: float
     #: Human-readable label for the distribution under test.
     phi_description: str
+    #: Fourier sparsity parameter (``None`` for parity experiments).
+    k: Optional[int] = None
+    #: For k-sparse hypotheses, maps each selected parity index to its
+    #: estimated Fourier coefficient.  ``None`` for parity experiments.
+    hypothesis_coefficients: Optional[dict[int, float]] = None
+    #: Empirical misclassification rate :math:`\hat{P}[h(x) \neq y]`
+    #: on fresh samples.  ``None`` for parity experiments.
+    misclassification_rate: Optional[float] = None
 
 
 @dataclass

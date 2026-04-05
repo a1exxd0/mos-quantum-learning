@@ -771,3 +771,62 @@ class TestPackageImports:
         from experiments.harness import run_trials_parallel
 
         assert callable(run_trials_parallel)
+
+
+# ===================================================================
+# k-sparse fields
+# ===================================================================
+
+
+class TestTrialSpecKField:
+    """Tests for the k-sparse routing field on TrialSpec."""
+
+    def test_k_defaults_to_none(self):
+        """Existing specs without k should default to None."""
+        phi = make_single_parity(4, target_s=3)
+        spec = TrialSpec(
+            n=4, phi=phi, noise_rate=0.0, target_s=3, epsilon=0.3,
+            delta=0.1, theta=0.3, a_sq=1.0, b_sq=1.0, qfs_shots=500,
+            classical_samples_prover=300, classical_samples_verifier=500,
+            seed=42, phi_description="test",
+        )
+        assert spec.k is None
+
+    def test_k_explicit(self):
+        """TrialSpec with explicit k stores it correctly."""
+        phi = make_single_parity(4, target_s=3)
+        spec = TrialSpec(
+            n=4, phi=phi, noise_rate=0.0, target_s=3, epsilon=0.3,
+            delta=0.1, theta=0.3, a_sq=1.0, b_sq=1.0, qfs_shots=500,
+            classical_samples_prover=300, classical_samples_verifier=500,
+            seed=42, phi_description="test", k=4,
+        )
+        assert spec.k == 4
+
+
+class TestTrialResultKSparseFields:
+    """Tests for k-sparse optional fields on TrialResult."""
+
+    def test_defaults_to_none(self, sample_trial_result):
+        """Existing TrialResults without k-sparse fields default to None."""
+        assert sample_trial_result.k is None
+        assert sample_trial_result.hypothesis_coefficients is None
+        assert sample_trial_result.misclassification_rate is None
+
+    def test_k_sparse_fields_set(self):
+        """TrialResult with explicit k-sparse fields stores them."""
+        t = TrialResult(
+            n=4, seed=1, prover_time_s=0.1, qfs_shots=100,
+            qfs_postselected=50, postselection_rate=0.5, list_size=3,
+            prover_found_target=True, verifier_time_s=0.05,
+            verifier_samples=200, outcome="accept", accepted=True,
+            accumulated_weight=0.9, acceptance_threshold=0.85,
+            hypothesis_s=7, hypothesis_correct=True, total_copies=350,
+            total_time_s=0.15, epsilon=0.3, theta=0.3, delta=0.1,
+            a_sq=1.0, b_sq=1.0, phi_description="test",
+            k=2, hypothesis_coefficients={3: 0.6, 5: 0.4},
+            misclassification_rate=0.15,
+        )
+        assert t.k == 2
+        assert t.hypothesis_coefficients == {3: 0.6, 5: 0.4}
+        assert t.misclassification_rate == 0.15
