@@ -86,6 +86,7 @@ from experiments.harness.average_case import run_average_case_experiment
 from experiments.harness.bent import run_bent_experiment
 from experiments.harness.gate_noise import run_gate_noise_experiment
 from experiments.harness.k_sparse import run_k_sparse_experiment
+from experiments.harness.theta_sensitivity import run_theta_sensitivity_experiment
 from experiments.harness.noise import run_noise_sweep_experiment
 from experiments.harness.phi import (
     make_bent_function,
@@ -119,6 +120,7 @@ __all__ = [
     "run_bent_experiment",
     "run_gate_noise_experiment",
     "run_k_sparse_experiment",
+    "run_theta_sensitivity_experiment",
     "run_noise_sweep_experiment",
     "run_scaling_experiment",
     "run_soundness_experiment",
