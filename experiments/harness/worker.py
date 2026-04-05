@@ -226,6 +226,15 @@ def _run_trial_worker(spec: TrialSpec) -> TrialResult:
     )
 
 
+def _extract_spectrum(phi: list[float], threshold: float = 0.01) -> list[tuple[int, float]]:
+    """Compute Fourier spectrum of phi and return (index, coefficient) pairs above threshold."""
+    from experiments.harness.phi import _walsh_hadamard
+    phi_arr = np.array(phi)
+    tilde_phi = 1.0 - 2.0 * phi_arr
+    spectrum = _walsh_hadamard(tilde_phi)
+    return [(s, float(spectrum[s])) for s in range(len(spectrum)) if abs(spectrum[s]) > threshold]
+
+
 def _run_dishonest_trial(spec: TrialSpec, state) -> TrialResult:
     r"""Execute a dishonest-prover trial inside a worker process.
 
@@ -304,6 +313,61 @@ def _run_dishonest_trial(spec: TrialSpec, state) -> TrialResult:
             dummy_qfs,
             0,
         )
+    elif spec.dishonest_strategy == "partial_real":
+        # Include half of the real heavy coefficients plus fake ones.
+        heavy = _extract_spectrum(spec.phi)
+        heavy_sorted = sorted(heavy, key=lambda x: abs(x[1]), reverse=True)
+        # Take the weaker half of real coefficients
+        n_real = max(1, len(heavy_sorted) // 2)
+        real_part = [s for s, _ in heavy_sorted[n_real:]]  # weaker half
+        # Add fake indices
+        used = {s for s, _ in heavy}
+        fake_candidates = [s for s in range(2**n) if s not in used]
+        n_fake = min(3, len(fake_candidates))
+        fakes = sorted(rng.choice(fake_candidates, size=n_fake, replace=False).tolist()) if n_fake > 0 else []
+        L = sorted(real_part + fakes)
+        fake_msg = ProverMessage(
+            L, {s: 0.5 for s in L}, n, epsilon, spec.theta, dummy_sa, dummy_qfs, 0
+        )
+    elif spec.dishonest_strategy == "diluted_list":
+        # Include a minority of real coefficients diluted with many fake padding indices.
+        heavy = _extract_spectrum(spec.phi)
+        heavy_sorted = sorted(heavy, key=lambda x: abs(x[1]), reverse=True)
+        # Keep only the weakest quarter of real coefficients (insufficient weight)
+        n_keep = max(1, len(heavy_sorted) // 4)
+        kept_indices = [s for s, _ in heavy_sorted[-n_keep:]]
+        used = {s for s, _ in heavy}
+        padding_candidates = [s for s in range(2**n) if s not in used]
+        n_padding = min(20, len(padding_candidates))
+        padding = sorted(rng.choice(padding_candidates, size=n_padding, replace=False).tolist()) if n_padding > 0 else []
+        L = sorted(kept_indices + padding)
+        fake_msg = ProverMessage(
+            L, {s: 0.5 for s in L}, n, epsilon, spec.theta, dummy_sa, dummy_qfs, 0
+        )
+    elif spec.dishonest_strategy == "shifted_coefficients":
+        # Send entirely wrong indices with fabricated large coefficient claims.
+        heavy = _extract_spectrum(spec.phi)
+        used = {s for s, _ in heavy}
+        wrong_candidates = [s for s in range(2**n) if s not in used]
+        n_wrong = min(len(heavy), len(wrong_candidates))
+        chosen = sorted(rng.choice(wrong_candidates, size=max(1, n_wrong), replace=False).tolist())
+        # Claim large coefficients — verifier's independent estimates will find ~0
+        fake_msg = ProverMessage(
+            chosen, {s: 0.8 for s in chosen}, n, epsilon, spec.theta, dummy_sa, dummy_qfs, 0
+        )
+    elif spec.dishonest_strategy == "subset_plus_noise":
+        # Include only the single heaviest real coefficient plus several near-threshold fakes.
+        heavy = _extract_spectrum(spec.phi)
+        heavy_sorted = sorted(heavy, key=lambda x: abs(x[1]), reverse=True)
+        heaviest_s = heavy_sorted[0][0] if heavy_sorted else 0
+        used = {s for s, _ in heavy}
+        fake_candidates = [s for s in range(2**n) if s not in used]
+        n_fake = min(5, len(fake_candidates))
+        fakes = sorted(rng.choice(fake_candidates, size=n_fake, replace=False).tolist()) if n_fake > 0 else []
+        L = sorted([heaviest_s] + fakes)
+        fake_msg = ProverMessage(
+            L, {s: 0.3 for s in L}, n, epsilon, spec.theta, dummy_sa, dummy_qfs, 0
+        )
     else:
         raise ValueError(f"Unknown dishonest strategy: {spec.dishonest_strategy}")
 
@@ -312,6 +376,9 @@ def _run_dishonest_trial(spec: TrialSpec, state) -> TrialResult:
         fake_msg,
         epsilon=epsilon,
         delta=spec.delta,
+        theta=spec.theta,
+        a_sq=spec.a_sq,
+        b_sq=spec.b_sq,
         num_samples=spec.classical_samples_verifier,
     )
 
@@ -335,10 +402,10 @@ def _run_dishonest_trial(spec: TrialSpec, state) -> TrialResult:
         total_copies=spec.classical_samples_verifier,
         total_time_s=0.0,
         epsilon=epsilon,
-        theta=epsilon,
+        theta=spec.theta,
         delta=spec.delta,
-        a_sq=1.0,
-        b_sq=1.0,
+        a_sq=spec.a_sq,
+        b_sq=spec.b_sq,
         phi_description=f"soundness_{spec.dishonest_strategy}",
     )
 

@@ -788,6 +788,65 @@ class TestRunKSparseExperiment:
         assert Path(path).stat().st_size > 0
 
 
+class TestRunAbRegimeExperiment:
+    """Integration test for the a^2 != b^2 regime experiment runner."""
+
+    def test_runs_and_returns_result(self):
+        from experiments.harness.ab_regime import run_ab_regime_experiment
+
+        result = run_ab_regime_experiment(
+            n_range=range(4, 5),
+            gaps=[0.0, 0.1],
+            num_trials=2,
+            qfs_shots=500,
+            classical_samples_prover=300,
+            classical_samples_verifier=500,
+            base_seed=42,
+            max_workers=1,
+        )
+        assert isinstance(result, ExperimentResult)
+        assert result.experiment_name == "ab_regime"
+        # 1 n value * 2 gaps * 2 trials = 4
+        assert len(result.trials) == 4
+        assert result.wall_clock_s > 0
+
+    def test_a_sq_b_sq_differ_when_gap_positive(self):
+        """When gap > 0, a_sq and b_sq in trial results must differ."""
+        from experiments.harness.ab_regime import run_ab_regime_experiment
+
+        result = run_ab_regime_experiment(
+            n_range=range(4, 5),
+            gaps=[0.2],
+            num_trials=2,
+            qfs_shots=500,
+            classical_samples_prover=300,
+            classical_samples_verifier=500,
+            base_seed=42,
+            max_workers=1,
+        )
+        for t in result.trials:
+            assert t.b_sq > t.a_sq, (
+                f"Expected b_sq > a_sq for gap=0.2, got a_sq={t.a_sq}, b_sq={t.b_sq}"
+            )
+
+    def test_gap_zero_matches_equal_regime(self):
+        """With gap=0, a_sq should equal b_sq (existing regime)."""
+        from experiments.harness.ab_regime import run_ab_regime_experiment
+
+        result = run_ab_regime_experiment(
+            n_range=range(4, 5),
+            gaps=[0.0],
+            num_trials=2,
+            qfs_shots=500,
+            classical_samples_prover=300,
+            classical_samples_verifier=500,
+            base_seed=42,
+            max_workers=1,
+        )
+        for t in result.trials:
+            assert t.a_sq == t.b_sq
+
+
 # ===================================================================
 # CLI argument parsing
 # ===================================================================
@@ -971,3 +1030,53 @@ class TestTrialResultKSparseFields:
         assert t.k == 2
         assert t.hypothesis_coefficients == {3: 0.6, 5: 0.4}
         assert t.misclassification_rate == 0.15
+
+
+class TestMultiElementDishonestStrategies:
+    """Tests for dishonest strategies against k-sparse target functions."""
+
+    def _make_k_sparse_dishonest_spec(self, strategy, k=4, n=4, seed=42):
+        """Helper: build a TrialSpec for a k-sparse dishonest trial."""
+        rng = default_rng(seed)
+        phi, target_s, pw = make_k_sparse(n, k, rng)
+        return TrialSpec(
+            n=n,
+            phi=phi,
+            noise_rate=0.0,
+            target_s=target_s,
+            epsilon=0.3,
+            delta=0.1,
+            theta=0.15,
+            a_sq=pw,
+            b_sq=pw,
+            qfs_shots=0,
+            classical_samples_prover=0,
+            classical_samples_verifier=3000,
+            seed=seed + 100,
+            phi_description=f"soundness_multi_{strategy}",
+            dishonest_strategy=strategy,
+        )
+
+    def test_partial_real_rejected(self):
+        """partial_real: some real + some fake coefficients should be rejected."""
+        spec = self._make_k_sparse_dishonest_spec("partial_real")
+        result = _run_trial_worker(spec)
+        assert not result.accepted
+
+    def test_diluted_list_rejected(self):
+        """diluted_list: few real coefficients diluted with many fakes should be rejected."""
+        spec = self._make_k_sparse_dishonest_spec("diluted_list")
+        result = _run_trial_worker(spec)
+        assert not result.accepted
+
+    def test_shifted_coefficients_rejected(self):
+        """shifted_coefficients: wrong indices with fabricated weights should be rejected."""
+        spec = self._make_k_sparse_dishonest_spec("shifted_coefficients")
+        result = _run_trial_worker(spec)
+        assert not result.accepted
+
+    def test_subset_plus_noise_rejected(self):
+        """subset_plus_noise: 1 real heavy coeff + near-threshold fakes should be rejected."""
+        spec = self._make_k_sparse_dishonest_spec("subset_plus_noise")
+        result = _run_trial_worker(spec)
+        assert not result.accepted
