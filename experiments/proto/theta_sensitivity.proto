@@ -1,0 +1,21 @@
+syntax = "proto3";
+package experiments;
+
+import "experiments/proto/common.proto";
+
+message ThetaSensitivityParameters {
+  repeated int32 n_range = 1;
+  repeated double theta_values = 2;
+  int32 num_trials = 3;
+  double epsilon = 4;
+  double delta = 5;
+  int32 qfs_shots = 6;
+  int32 classical_samples_prover = 7;
+  int32 classical_samples_verifier = 8;
+}
+
+message ThetaSensitivityExperimentResult {
+  ExperimentMetadata metadata = 1;
+  ThetaSensitivityParameters parameters = 2;
+  repeated TrialResult trials = 3;
+}

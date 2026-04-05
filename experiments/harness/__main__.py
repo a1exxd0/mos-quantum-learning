@@ -20,11 +20,15 @@ from pathlib import Path
 
 from experiments.harness.average_case import run_average_case_experiment
 from experiments.harness.gate_noise import run_gate_noise_experiment
+from experiments.harness.ab_regime import run_ab_regime_experiment
+from experiments.harness.k_sparse import run_k_sparse_experiment
+from experiments.harness.theta_sensitivity import run_theta_sensitivity_experiment
 from experiments.harness.scaling import run_scaling_experiment
 from experiments.harness.bent import run_bent_experiment
 from experiments.harness.truncation import run_truncation_experiment
 from experiments.harness.noise import run_noise_sweep_experiment
 from experiments.harness.soundness import run_soundness_experiment
+from experiments.harness.soundness_multi import run_soundness_multi_experiment
 
 
 def _add_common_args(parser: argparse.ArgumentParser):
@@ -143,6 +147,20 @@ def _run_soundness(args):
     return [r]
 
 
+def _run_soundness_multi(args):
+    output_dir = Path(args.output_dir)
+    soundness_trials = max(args.trials, 50)
+    r = run_soundness_multi_experiment(
+        n_range=range(args.n_min, args.n_max + 1),
+        num_trials=soundness_trials,
+        base_seed=args.seed,
+        max_workers=args.workers,
+        **_shard_kwargs(args),
+    )
+    r.save(_output_path(output_dir, f"soundness_multi_{args.n_min}_{args.n_max}_{soundness_trials}", args))
+    return [r]
+
+
 def _run_average_case(args):
     output_dir = Path(args.output_dir)
     r = run_average_case_experiment(
@@ -169,6 +187,45 @@ def _run_gate_noise(args):
     return [r]
 
 
+def _run_k_sparse(args):
+    output_dir = Path(args.output_dir)
+    r = run_k_sparse_experiment(
+        n_range=range(args.n_min, args.n_max + 1, 2),
+        num_trials=args.trials,
+        base_seed=args.seed,
+        max_workers=args.workers,
+        **_shard_kwargs(args),
+    )
+    r.save(_output_path(output_dir, f"k_sparse_{args.n_min}_{args.n_max}_{args.trials}", args))
+    return [r]
+
+
+def _run_theta_sensitivity(args):
+    output_dir = Path(args.output_dir)
+    r = run_theta_sensitivity_experiment(
+        n_range=range(args.n_min, args.n_max + 1, 2),
+        num_trials=args.trials,
+        base_seed=args.seed,
+        max_workers=args.workers,
+        **_shard_kwargs(args),
+    )
+    r.save(_output_path(output_dir, f"theta_sensitivity_{args.n_min}_{args.n_max}_{args.trials}", args))
+    return [r]
+
+
+def _run_ab_regime(args):
+    output_dir = Path(args.output_dir)
+    r = run_ab_regime_experiment(
+        n_range=range(args.n_min, args.n_max + 1),
+        num_trials=args.trials,
+        base_seed=args.seed,
+        max_workers=args.workers,
+        **_shard_kwargs(args),
+    )
+    r.save(_output_path(output_dir, f"ab_regime_{args.n_min}_{args.n_max}_{args.trials}", args))
+    return [r]
+
+
 def _run_merge(args):
     from experiments.harness.sharding import merge_shard_files
 
@@ -183,8 +240,12 @@ def _run_all(args):
     experiments.extend(_run_truncation(args))
     experiments.extend(_run_noise(args))
     experiments.extend(_run_soundness(args))
+    experiments.extend(_run_soundness_multi(args))
     experiments.extend(_run_average_case(args))
     experiments.extend(_run_gate_noise(args))
+    experiments.extend(_run_k_sparse(args))
+    experiments.extend(_run_theta_sensitivity(args))
+    experiments.extend(_run_ab_regime(args))
     return experiments
 
 
@@ -222,12 +283,28 @@ def main():
     sp = subparsers.add_parser("soundness", help="Soundness against dishonest provers")
     _add_common_args(sp)
 
+    # --- soundness_multi ---
+    sp = subparsers.add_parser("soundness_multi", help="Soundness against dishonest provers with multi-element targets")
+    _add_common_args(sp)
+
     # --- average_case ---
     sp = subparsers.add_parser("average_case", help="Average-case performance across function families")
     _add_common_args(sp)
 
     # --- gate_noise ---
     sp = subparsers.add_parser("gate_noise", help="Gate-level depolarising noise experiment")
+    _add_common_args(sp)
+
+    # --- k_sparse ---
+    sp = subparsers.add_parser("k_sparse", help="k-Fourier-sparse verification path experiment")
+    _add_common_args(sp)
+
+    # --- theta_sensitivity ---
+    sp = subparsers.add_parser("theta_sensitivity", help="Theta sensitivity: extraction boundary mapping")
+    _add_common_args(sp)
+
+    # --- ab_regime ---
+    sp = subparsers.add_parser("ab_regime", help="a^2 != b^2 distributional regime experiment")
     _add_common_args(sp)
 
     # --- all ---
@@ -273,8 +350,12 @@ def main():
         "truncation": _run_truncation,
         "noise": _run_noise,
         "soundness": _run_soundness,
+        "soundness_multi": _run_soundness_multi,
         "average_case": _run_average_case,
         "gate_noise": _run_gate_noise,
+        "k_sparse": _run_k_sparse,
+        "theta_sensitivity": _run_theta_sensitivity,
+        "ab_regime": _run_ab_regime,
         "all": _run_all,
         "merge": _run_merge,
     }

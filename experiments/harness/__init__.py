@@ -81,9 +81,12 @@ Programmatic use::
    :doi:`10.4230/LIPIcs.ITCS.2024.24`.
 """
 
+from experiments.harness.ab_regime import run_ab_regime_experiment
 from experiments.harness.average_case import run_average_case_experiment
 from experiments.harness.bent import run_bent_experiment
 from experiments.harness.gate_noise import run_gate_noise_experiment
+from experiments.harness.k_sparse import run_k_sparse_experiment
+from experiments.harness.theta_sensitivity import run_theta_sensitivity_experiment
 from experiments.harness.noise import run_noise_sweep_experiment
 from experiments.harness.phi import (
     make_bent_function,
@@ -96,6 +99,7 @@ from experiments.harness.phi import (
 from experiments.harness.results import ExperimentResult, TrialResult
 from experiments.harness.scaling import run_scaling_experiment
 from experiments.harness.soundness import run_soundness_experiment
+from experiments.harness.soundness_multi import run_soundness_multi_experiment
 from experiments.harness.truncation import run_truncation_experiment
 from experiments.harness.sharding import merge_shard_files, shard_specs
 from experiments.harness.worker import TrialSpec, run_trials_parallel
@@ -112,12 +116,16 @@ __all__ = [
     "make_random_parity",
     "make_single_parity",
     "make_sparse_plus_noise",
+    "run_ab_regime_experiment",
     "run_average_case_experiment",
     "run_bent_experiment",
     "run_gate_noise_experiment",
+    "run_k_sparse_experiment",
+    "run_theta_sensitivity_experiment",
     "run_noise_sweep_experiment",
     "run_scaling_experiment",
     "run_soundness_experiment",
+    "run_soundness_multi_experiment",
     "run_trials_parallel",
     "run_truncation_experiment",
 ]

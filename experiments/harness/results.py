@@ -15,6 +15,10 @@ from experiments.proto import (
     soundness_pb2,
     average_case_pb2,
     gate_noise_pb2,
+    k_sparse_pb2,
+    soundness_multi_pb2,
+    theta_sensitivity_pb2,
+    ab_regime_pb2,
 )
 
 
@@ -92,6 +96,14 @@ class TrialResult:
     b_sq: float
     #: Human-readable label for the distribution under test.
     phi_description: str
+    #: Fourier sparsity parameter (``None`` for parity experiments).
+    k: Optional[int] = None
+    #: For k-sparse hypotheses, maps each selected parity index to its
+    #: estimated Fourier coefficient.  ``None`` for parity experiments.
+    hypothesis_coefficients: Optional[dict[int, float]] = None
+    #: Empirical misclassification rate :math:`\hat{P}[h(x) \neq y]`
+    #: on fresh samples.  ``None`` for parity experiments.
+    misclassification_rate: Optional[float] = None
 
 
 @dataclass
@@ -206,6 +218,18 @@ class ExperimentResult:
                 ),
                 trials=trial_pbs,
             )
+        elif self.experiment_name == "soundness_multi":
+            return soundness_multi_pb2.SoundnessMultiExperimentResult(
+                metadata=metadata,
+                parameters=soundness_multi_pb2.SoundnessMultiParameters(
+                    n_range=params["n_range"],
+                    k_range=params["k_range"],
+                    num_trials=params["num_trials"],
+                    epsilon=params["epsilon"],
+                    strategies=params["strategies"],
+                ),
+                trials=trial_pbs,
+            )
         elif self.experiment_name == "gate_noise":
             return gate_noise_pb2.GateNoiseExperimentResult(
                 metadata=metadata,
@@ -229,6 +253,48 @@ class ExperimentResult:
                     qfs_shots=params["qfs_shots"],
                     classical_samples_prover=params["classical_samples_prover"],
                     classical_samples_verifier=params["classical_samples_verifier"],
+                ),
+                trials=trial_pbs,
+            )
+        elif self.experiment_name == "k_sparse":
+            return k_sparse_pb2.KSparseExperimentResult(
+                metadata=metadata,
+                parameters=k_sparse_pb2.KSparseParameters(
+                    n_range=params["n_range"],
+                    k_values=params["k_values"],
+                    num_trials=params["num_trials"],
+                    epsilon=params["epsilon"],
+                    delta=params["delta"],
+                    qfs_shots=params["qfs_shots"],
+                    classical_samples_prover=params["classical_samples_prover"],
+                    classical_samples_verifier=params["classical_samples_verifier"],
+                    misclassification_samples=params["misclassification_samples"],
+                ),
+                trials=trial_pbs,
+            )
+        elif self.experiment_name == "theta_sensitivity":
+            return theta_sensitivity_pb2.ThetaSensitivityExperimentResult(
+                metadata=metadata,
+                parameters=theta_sensitivity_pb2.ThetaSensitivityParameters(
+                    n_range=params["n_range"],
+                    theta_values=params["theta_values"],
+                    num_trials=params["num_trials"],
+                    epsilon=params["epsilon"],
+                    delta=params["delta"],
+                    qfs_shots=params["qfs_shots"],
+                    classical_samples_prover=params["classical_samples_prover"],
+                    classical_samples_verifier=params["classical_samples_verifier"],
+                ),
+                trials=trial_pbs,
+            )
+        elif self.experiment_name == "ab_regime":
+            return ab_regime_pb2.AbRegimeExperimentResult(
+                metadata=metadata,
+                parameters=ab_regime_pb2.AbRegimeParameters(
+                    n_range=params["n_range"],
+                    gaps=params["gaps"],
+                    num_trials=params["num_trials"],
+                    epsilon=params["epsilon"],
                 ),
                 trials=trial_pbs,
             )
@@ -305,4 +371,11 @@ def _trial_to_proto(t: TrialResult) -> common_pb2.TrialResult:
     )
     if t.hypothesis_s is not None:
         pb.hypothesis_s = int(t.hypothesis_s)
+    if t.k is not None:
+        pb.k = int(t.k)
+    if t.hypothesis_coefficients is not None:
+        for s_idx, coeff in t.hypothesis_coefficients.items():
+            pb.hypothesis_coefficients[int(s_idx)] = float(coeff)
+    if t.misclassification_rate is not None:
+        pb.misclassification_rate = float(t.misclassification_rate)
     return pb

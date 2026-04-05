@@ -11,6 +11,8 @@ Always use Context7 when I need library/API documentation, code generation, setu
 If you are logged into thhe `kudu-taught` server, you have access to DCS batch compute. Use `experiments/DCS_BATCH_COMPUTE.md` to find information 
 about how to use the batch compute system.
 
+Do not mention Claude Code as a co-author.
+
 # Run tests
 Use parallel workers matching the computer's core count:
 ```sh
@@ -20,7 +22,7 @@ uv run pytest -n auto
 # Run experiments
 Use `--workers` to parallelise with the computer's core count:
 ```sh
-uv run python -m experiments.harness {scaling,bent,truncation,noise,soundness,average_case,gate_noise,all} --workers $(nproc 2>/dev/null || sysctl -n hw.ncpu)
+uv run python -m experiments.harness {scaling,bent,truncation,noise,soundness,soundness_multi,average_case,gate_noise,k_sparse,theta_sensitivity,ab_regime,all} --workers $(nproc 2>/dev/null || sysctl -n hw.ncpu)
 ```
 
 # Run experiments on the DCS cluster (SLURM)

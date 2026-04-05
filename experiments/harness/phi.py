@@ -107,7 +107,7 @@ def _chi(s: int, x: int) -> float:
     return 1.0 - 2.0 * _parity_value(s, x)
 
 
-def _walsh_hadamard(phi_tilde: np.ndarray) -> np.ndarray:
+def walsh_hadamard(phi_tilde: np.ndarray) -> np.ndarray:
     r"""In-place Walsh--Hadamard transform (unnormalised).
 
     Given :math:`\tilde\phi(x) \in \{-1, +1\}^{2^n}`, returns
@@ -173,7 +173,15 @@ def make_k_sparse(
         phi_tilde_x = sum(
             coeffs[i] * _chi(int(indices[i]), x) for i in range(k)
         )
-        phi.append((1.0 - phi_tilde_x) / 2.0)
+        # Dirichlet coefficients sum to 1 analytically so
+        # |phi_tilde_x| <= 1 by the triangle inequality, but floating-point
+        # roundoff in sum(coeffs) can exceed 1 by O(machine epsilon).
+        val = (1.0 - phi_tilde_x) / 2.0
+        assert -1e-9 < val < 1.0 + 1e-9, (
+            f"make_k_sparse: phi[{x}] = {val} is too far outside [0, 1] "
+            f"(phi_tilde_x = {phi_tilde_x})"
+        )
+        phi.append(np.clip(val, 0.0, 1.0))
 
     target_s = int(indices[np.argmax(coeffs)])
     parseval_weight = float(np.sum(coeffs**2))
@@ -212,7 +220,7 @@ def make_random_boolean(
     N = 2**n
     phi_arr = rng.integers(0, 2, size=N).astype(np.float64)
     phi_tilde = 1.0 - 2.0 * phi_arr
-    spectrum = _walsh_hadamard(phi_tilde)
+    spectrum = walsh_hadamard(phi_tilde)
     target_s = int(np.argmax(np.abs(spectrum)))
     return phi_arr.tolist(), target_s
 

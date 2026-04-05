@@ -20,7 +20,11 @@ from experiments.proto import (
     truncation_pb2,
     noise_sweep_pb2,
     soundness_pb2,
+    soundness_multi_pb2,
     gate_noise_pb2,
+    k_sparse_pb2,
+    theta_sensitivity_pb2,
+    ab_regime_pb2,
 )
 
 # Maps experiment_name (from ExperimentMetadata) to its top-level proto class.
@@ -30,8 +34,12 @@ _RESULT_TYPES = {
     "verifier_truncation": truncation_pb2.TruncationExperimentResult,
     "noise_sweep": noise_sweep_pb2.NoiseSweepExperimentResult,
     "soundness": soundness_pb2.SoundnessExperimentResult,
+    "soundness_multi": soundness_multi_pb2.SoundnessMultiExperimentResult,
     "gate_noise": gate_noise_pb2.GateNoiseExperimentResult,
+    "k_sparse": k_sparse_pb2.KSparseExperimentResult,
     "average_case": average_case_pb2.AverageCaseExperimentResult,
+    "theta_sensitivity": theta_sensitivity_pb2.ThetaSensitivityExperimentResult,
+    "ab_regime": ab_regime_pb2.AbRegimeExperimentResult,
 }
 
 # Filename prefixes to experiment names, for files whose experiment_name
@@ -41,9 +49,13 @@ _PREFIX_MAP = {
     "bent": "bent_function",
     "truncation": "verifier_truncation",
     "noise_sweep": "noise_sweep",
+    "soundness_multi": "soundness_multi",
     "soundness": "soundness",
     "gate_noise": "gate_noise",
+    "k_sparse": "k_sparse",
     "average_case": "average_case",
+    "theta_sensitivity": "theta_sensitivity",
+    "ab_regime": "ab_regime",
 }
 
 
