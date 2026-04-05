@@ -79,6 +79,7 @@ Every verification protocol follows the same four steps:
 | gate_noise | `gate_noise.py` | `make_random_parity` + depolarising circuit noise | 1 | `verify_parity` | empirical (beyond paper) |
 | soundness_multi | `soundness_multi.py` | `make_k_sparse` + dishonest prover (multi-element L) | varies | `verify_parity` | 7, 12 (soundness, multi-element) |
 | theta_sensitivity | `theta_sensitivity.py` | `make_sparse_plus_noise` | 1-4+ (theta-dependent) | `verify_parity` | Corollary 5, Gap 5 |
+| ab_regime | `ab_regime.py` | `make_sparse_plus_noise` | 1 | `verify_parity` | 11, 12 (Definition 14) |
 
 ### 2.2 What Is Well-Covered
 
@@ -147,7 +148,7 @@ means:
 **Impact**: The implementation of Theorems 9, 10, 14, 15 has zero
 empirical validation.
 
-### Gap 2: a^2 != b^2 regime never tested (HIGH)
+### Gap 2: a^2 != b^2 regime never tested (HIGH) -- CLOSED
 
 **Location**: All experiment modules set `a_sq = b_sq`.
 
@@ -172,6 +173,15 @@ threshold or list-size calculations would be hidden.
 
 **Impact**: Bugs in how a^2 and b^2 are used separately in the
 verifier's threshold vs list-size checks are invisible.
+
+**Status**: Closed by `experiments/harness/ab_regime.py`. The experiment
+sweeps `gap = b_sq - a_sq` over `{0.0, 0.05, 0.1, 0.2, 0.3, 0.4}`
+using `make_sparse_plus_noise` (pw ~ 0.52), setting
+`a_sq = pw - gap/2`, `b_sq = pw + gap/2`. This exercises the verifier's
+acceptance threshold (`a^2 - epsilon^2/8`) and list-size bound
+(`64*b^2/theta^2`) under distinct `a_sq` and `b_sq` values, validating
+the Definition 14 parameter space. Registered as CLI subcommand
+`ab_regime`.
 
 ### Gap 3: Multi-element L soundness not tested (HIGH) — CLOSED
 
