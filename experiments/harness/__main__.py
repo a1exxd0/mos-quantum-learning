@@ -22,6 +22,7 @@ from experiments.harness.average_case import run_average_case_experiment
 from experiments.harness.gate_noise import run_gate_noise_experiment
 from experiments.harness.ab_regime import run_ab_regime_experiment
 from experiments.harness.k_sparse import run_k_sparse_experiment
+from experiments.harness.theta_sensitivity import run_theta_sensitivity_experiment
 from experiments.harness.scaling import run_scaling_experiment
 from experiments.harness.bent import run_bent_experiment
 from experiments.harness.truncation import run_truncation_experiment
@@ -184,6 +185,19 @@ def _run_k_sparse(args):
     return [r]
 
 
+def _run_theta_sensitivity(args):
+    output_dir = Path(args.output_dir)
+    r = run_theta_sensitivity_experiment(
+        n_range=range(args.n_min, args.n_max + 1, 2),
+        num_trials=args.trials,
+        base_seed=args.seed,
+        max_workers=args.workers,
+        **_shard_kwargs(args),
+    )
+    r.save(_output_path(output_dir, f"theta_sensitivity_{args.n_min}_{args.n_max}_{args.trials}", args))
+    return [r]
+
+
 def _run_ab_regime(args):
     output_dir = Path(args.output_dir)
     r = run_ab_regime_experiment(
@@ -214,6 +228,7 @@ def _run_all(args):
     experiments.extend(_run_average_case(args))
     experiments.extend(_run_gate_noise(args))
     experiments.extend(_run_k_sparse(args))
+    experiments.extend(_run_theta_sensitivity(args))
     experiments.extend(_run_ab_regime(args))
     return experiments
 
@@ -262,6 +277,10 @@ def main():
 
     # --- k_sparse ---
     sp = subparsers.add_parser("k_sparse", help="k-Fourier-sparse verification path experiment")
+    _add_common_args(sp)
+
+    # --- theta_sensitivity ---
+    sp = subparsers.add_parser("theta_sensitivity", help="Theta sensitivity: extraction boundary mapping")
     _add_common_args(sp)
 
     # --- ab_regime ---
@@ -314,6 +333,7 @@ def main():
         "average_case": _run_average_case,
         "gate_noise": _run_gate_noise,
         "k_sparse": _run_k_sparse,
+        "theta_sensitivity": _run_theta_sensitivity,
         "ab_regime": _run_ab_regime,
         "all": _run_all,
         "merge": _run_merge,
