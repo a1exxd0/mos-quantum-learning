@@ -302,6 +302,8 @@ def run_trials_parallel(
     specs: list[TrialSpec],
     max_workers: Optional[int] = None,
     label: str = "",
+    shard_index: Optional[int] = None,
+    num_shards: Optional[int] = None,
 ) -> list[TrialResult]:
     r"""Dispatch a batch of trials across worker processes.
 
@@ -315,6 +317,11 @@ def run_trials_parallel(
     the main process (useful for debugging — parallel tracebacks are
     less readable).
 
+    When *shard_index* and *num_shards* are both set, only the
+    contiguous slice of *specs* assigned to this shard is executed.
+    This enables SLURM Job Array distribution where each array task
+    regenerates the full spec list but runs only its portion.
+
     Parameters
     ----------
     specs : list[TrialSpec]
@@ -324,14 +331,30 @@ def run_trials_parallel(
         :func:`os.cpu_count`.
     label : str
         Short label printed in progress output (e.g. ``"scaling"``).
+    shard_index : int or None
+        0-based index of this shard (requires *num_shards*).
+    num_shards : int or None
+        Total number of shards (requires *shard_index*).
 
     Returns
     -------
     list[TrialResult]
-        Results in the same order as *specs*.
+        Results in the same order as the (possibly sharded) *specs*.
     """
     if max_workers is None:
         max_workers = os.cpu_count() or 1
+
+    # --- Apply sharding if requested ---
+    if shard_index is not None and num_shards is not None:
+        from experiments.harness.sharding import shard_specs
+
+        full_count = len(specs)
+        specs = shard_specs(specs, shard_index, num_shards)
+        label = f"{label} shard {shard_index + 1}/{num_shards}" if label else f"shard {shard_index + 1}/{num_shards}"
+        print(
+            f"  Shard {shard_index + 1}/{num_shards}: {len(specs)} of {full_count} specs",
+            flush=True,
+        )
 
     total = len(specs)
     if total == 0:

@@ -14,6 +14,7 @@ from pathlib import Path
 from google.protobuf.json_format import MessageToJson
 
 from experiments.proto import (
+    average_case_pb2,
     scaling_pb2,
     bent_pb2,
     truncation_pb2,
@@ -30,6 +31,7 @@ _RESULT_TYPES = {
     "noise_sweep": noise_sweep_pb2.NoiseSweepExperimentResult,
     "soundness": soundness_pb2.SoundnessExperimentResult,
     "gate_noise": gate_noise_pb2.GateNoiseExperimentResult,
+    "average_case": average_case_pb2.AverageCaseExperimentResult,
 }
 
 # Filename prefixes to experiment names, for files whose experiment_name
@@ -41,6 +43,7 @@ _PREFIX_MAP = {
     "noise_sweep": "noise_sweep",
     "soundness": "soundness",
     "gate_noise": "gate_noise",
+    "average_case": "average_case",
 }
 
 

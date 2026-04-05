@@ -19,6 +19,8 @@ def run_bent_experiment(
     classical_samples_verifier: int = 5000,
     base_seed: int = 42,
     max_workers: int = 1,
+    shard_index: int | None = None,
+    num_shards: int | None = None,
 ) -> ExperimentResult:
     r"""Bent function worst-case experiment.
 
@@ -95,7 +97,10 @@ def run_bent_experiment(
             )
 
     t0 = time.time()
-    trials = run_trials_parallel(specs, max_workers=max_workers, label="bent")
+    trials = run_trials_parallel(
+        specs, max_workers=max_workers, label="bent",
+        shard_index=shard_index, num_shards=num_shards,
+    )
     wall = time.time() - t0
 
     # For bent functions, "correct" means "accepted" (all parities equally heavy)

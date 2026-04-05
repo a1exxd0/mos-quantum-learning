@@ -1,6 +1,6 @@
 # Experiment Tracker
 
-Status as of 2026-04-02.
+Status as of 2026-04-04.
 
 ## Experiments Required by the Dissertation Plan (Chapter 5)
 
@@ -102,6 +102,57 @@ honest baseline.
     theta = eps for random_boolean and sparse_plus_noise.
   - a_sq = b_sq = Parseval weight (computed per-trial from coefficients).
 
+### Exp 3 -- Gate-Level Noise (Depolarising via Qiskit NoiseModel)
+- **Module:** `experiments/harness/gate_noise.py`
+- **Result file:** `results/gate_noise_4_8_50.pb`
+- **Coverage:** n=4..8, gate error rate p in
+  {0.0, 0.001, 0.005, 0.01, 0.02, 0.05, 0.1}, 50 trials per (n, p) cell.
+  Total: 1750 trials. Uses depolarising channels on H, X, CX gates via
+  Qiskit `NoiseModel`. Protocol run with a² = b² = 1 (noiseless promise),
+  θ = ε = 0.3, 2000 QFS shots, 1000 prover samples, 3000 verifier samples.
+  Target functions are random single parities.
+- **Wall clock:** ~23.8 hours (32 workers).
+- **Status:** COMPLETE. Exceeds the planned n=4..6 range by including n=7
+  and n=8, and uses 50 trials (vs planned 24) for tighter confidence.
+
+#### Key Results
+
+| n | p=0 acc | p=0.001 acc | p=0.005 acc | p=0.01 acc | p=0.02 acc | p=0.05 acc | p=0.1 acc |
+|---|---------|-------------|-------------|------------|------------|------------|-----------|
+| 4 | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
+| 5 | 100% | 100% | 98% | 96% | 96% | 96% | 98% |
+| 6 | 100% | 100% | 0% | 6% | 0% | 2% | 2% |
+| 7 | 100% | 0% | 0% | 0% | 0% | 0% | 0% |
+| 8 | 100% | 0% | 0% | 0% | 0% | 0% | 0% |
+
+#### Observations
+
+1. **p=0 baseline is clean:** 100% acceptance and correctness at all n,
+   confirming that the circuit pipeline (transpilation, MCX decomposition)
+   introduces no artefacts.
+
+2. **Gate noise inflates |L| at small n:** At n=4, |L| jumps from 1
+   (p=0) to 16 (all 2⁴ strings) at p≥0.005, and to ~3.7 at p=0.001.
+   At n=5, |L| reaches ~30 at p≥0.005. Despite this, the verifier's
+   weight check still passes and the correct hypothesis is identified.
+
+3. **Sharp breakdown scales with n:**
+   - n=4: No breakdown up to p=0.1 (protocol fully robust).
+   - n=5: Mild degradation (96--100%) but no full breakdown.
+   - n=6: Breakdown between p=0.001 and p=0.005.
+   - n=7--8: Breakdown between p=0 and p=0.001.
+
+4. **Circuit depth is the mechanism:** MCX on n qubits decomposes into
+   O(n) CX gates, each suffering independent depolarising error. The
+   effective error accumulates with depth, so the breakdown point
+   decreases with n. This is qualitatively different from label-flip
+   noise, where breakdown depends on η relative to θ, independent of n.
+
+5. **Physically realistic regime (p ≈ 0.001):** Protocol remains fully
+   functional at n=4--6, suggesting practical viability on near-term
+   hardware for small instances. At n≥7, even p=0.001 causes total
+   failure.
+
 ### Honest Baseline (5.2)
 - **Status:** IMPLICITLY COVERED by scaling (n=4..16) and noise (eta=0.0
   rows). No dedicated baseline result file exists, but the data is there.
@@ -112,42 +163,107 @@ honest baseline.
 
 ---
 
-## Missing Experiments
+## Pending Re-runs (n up to 20, 100 trials)
 
-### Exp 3 -- Gate-Level Noise (Depolarising via Qiskit NoiseModel)
-- **Module:** Not implemented.
-- **What's needed:**
-  1. Integrate Qiskit's `NoiseModel` with depolarising channels on H, X,
-     CX gates into the MoS simulator (currently the simulator only
-     supports label-flip noise via phi manipulation).
-  2. Sweep depolarising error rate p and record accept/reject outcomes.
-  3. This goes beyond existing theory (Caro et al. and Ma--Su--Deng
-     analyse label-flip / oracle-level noise, not gate-level noise),
-     so there is no theoretical prediction to compare against -- the
-     result is inherently empirical and novel.
-- **Effort estimate:** Medium. Requires adding a `NoiseModel` execution
-  path in `mos/sampler.py` or a wrapper, plus a new experiment harness
-  module and proto schema.
+All experiments except Exp 3 (gate noise) are being re-run with extended
+n ranges and 100 trials per cell for tighter confidence intervals. The
+initial results above remain as reference; the re-runs will supersede
+them.
+
+### Exp 1 -- Soundness (re-run)
+- **Target:** n=4..20, 100 trials per (n, strategy) cell.
+- **Output:** `results/soundness_4_20_100.pb`
+- **Command:**
+  ```bash
+  bash experiments/slurm/submit.sh soundness 4 20 100 8
+  ```
+- **Status:** PENDING.
+
+### Exp 2 -- Noise Sweep (re-run)
+- **Target:** n=4..20, 100 trials per (n, eta) cell.
+- **Output:** `results/noise_sweep_4_20_100.pb`
+- **Command:**
+  ```bash
+  bash experiments/slurm/submit.sh noise 4 20 100 8
+  ```
+- **Status:** PENDING.
+
+### Exp 4 -- Scaling Sweep (re-run)
+- **Target:** n=4..20, 100 trials per n.
+- **Output:** `results/scaling_4_20_100.pb`
+- **Command:**
+  ```bash
+  bash experiments/slurm/submit.sh scaling 4 20 100 8
+  ```
+- **Status:** PENDING.
+
+### Exp 5 -- Bent Functions (re-run)
+- **Target:** Even n from 4..20, 100 trials per n.
+- **Output:** `results/bent_4_20_100.pb`
+- **Command:**
+  ```bash
+  bash experiments/slurm/submit.sh bent 4 20 100 8
+  ```
+- **Status:** PENDING.
+
+### Exp 6 -- Verifier Truncation (re-run, independent per n)
+- **Target:** n in {4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, 100 trials
+  per (epsilon, verifier_samples) cell per n. Truncation takes a fixed n
+  (no range sweep), so each n requires a separate submission.
+- **Output:** `results/truncation_{n}_{n}_100.pb` for each n.
+- **Commands:**
+  ```bash
+  for N in $(seq 4 14); do
+    bash experiments/slurm/submit.sh truncation $N $N 100 8
+  done
+  ```
+- **Status:** PENDING.
+
+### Exp 7 -- Average-Case (re-run)
+- **Target:** n=4..20, 100 trials per (n, family) cell.
+- **Output:** `results/average_case_4_20_100.pb`
+- **Command:**
+  ```bash
+  bash experiments/slurm/submit.sh average_case 4 20 100 8
+  ```
+- **Status:** PENDING.
+
+### Summary of re-run submissions
+
+| Exp | Command | Shards | Cells | Trials |
+|-----|---------|--------|-------|--------|
+| 1 (soundness) | `submit.sh soundness 4 20 100 8` | 8 | 17 n × 4 strategies = 68 | 6,800 |
+| 2 (noise) | `submit.sh noise 4 20 100 8` | 8 | 17 n × 9 eta = 153 | 15,300 |
+| 4 (scaling) | `submit.sh scaling 4 20 100 8` | 8 | 17 n | 1,700 |
+| 5 (bent) | `submit.sh bent 4 20 100 8` | 8 | 9 even n | 900 |
+| 6 (truncation) | 11 × `submit.sh truncation N N 100 8` | 88 | 11 n × 30 grid = 330 | 33,000 |
+| 7 (average case) | `submit.sh average_case 4 20 100 8` | 8 | 17 n × 4 families = 68 | 6,800 |
+| **Total** | 16 submissions | 128 | | **64,500** |
 
 ---
 
 ## Next Steps
 
-### Priority 1: Complete missing experiments
-1. **Exp 3 (gate-level noise):** Add `NoiseModel` support to the simulator
-   and write `experiments/harness/gate_noise.py`. Start with a small-n
-   sweep (n=4..6) to validate, then extend.
-2. ~~**Exp 7 (average-case):**~~ DONE (2026-04-02). Implemented
-   `make_k_sparse`, `make_random_boolean`, `make_sparse_plus_noise` in
-   `phi.py` and `experiments/harness/average_case.py`.
+### Priority 1: Submit re-runs
+1. Submit all re-run jobs listed above. Can be done in one batch:
+   ```bash
+   # All sweep experiments
+   for EXP in soundness noise scaling bent average_case; do
+     bash experiments/slurm/submit.sh $EXP 4 20 100 8
+   done
+   # Truncation (independent per n)
+   for N in $(seq 4 14); do
+     bash experiments/slurm/submit.sh truncation $N $N 100 8
+   done
+   ```
+2. Monitor with `squeue --me`. Gate noise (Exp 3) is already final
+   (`gate_noise_4_8_50.pb`) and does not need re-running.
 
-### Priority 2: Strengthen existing experiments
-3. ~~**Truncation at larger n:**~~ DONE (2026-04-02). Ran at n=10 and n=12
-   with 24 trials per cell. Results in `truncation_10_10_24.pb` and
-   `truncation_12_12_24.pb`.
-4. **Honest baseline diagnostics:** Extract or re-run baseline trials at
-   n={4, 10, 16} with explicit GL diagnostics (tree depth, nodes
-   explored, false positive/negative rates).
+### Priority 2: Post-run analysis
+3. **Honest baseline diagnostics:** Extract baseline metrics from the
+   new scaling re-run (eta=0.0 equivalent) at n={4, 10, 16, 20}.
+4. Verify that n=18 and n=20 results are tractable — GL extraction time
+   may become the bottleneck at these dimensions.
 
 ### Priority 3: Writing tasks
 5. Connect noise sweep results to Ma--Su--Deng threshold analysis.

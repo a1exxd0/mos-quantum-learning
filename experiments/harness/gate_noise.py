@@ -21,6 +21,8 @@ def run_gate_noise_experiment(
     classical_samples_verifier: int = 3000,
     base_seed: int = 42,
     max_workers: int = 1,
+    shard_index: int | None = None,
+    num_shards: int | None = None,
 ) -> ExperimentResult:
     r"""Gate-level noise sweep: verification under depolarising gate errors.
 
@@ -110,7 +112,10 @@ def run_gate_noise_experiment(
                 )
 
     t0 = time.time()
-    trials = run_trials_parallel(specs, max_workers=max_workers, label="gate_noise")
+    trials = run_trials_parallel(
+        specs, max_workers=max_workers, label="gate_noise",
+        shard_index=shard_index, num_shards=num_shards,
+    )
     wall = time.time() - t0
 
     result = ExperimentResult(

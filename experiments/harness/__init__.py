@@ -97,12 +97,15 @@ from experiments.harness.results import ExperimentResult, TrialResult
 from experiments.harness.scaling import run_scaling_experiment
 from experiments.harness.soundness import run_soundness_experiment
 from experiments.harness.truncation import run_truncation_experiment
+from experiments.harness.sharding import merge_shard_files, shard_specs
 from experiments.harness.worker import TrialSpec, run_trials_parallel
 
 __all__ = [
     "ExperimentResult",
     "TrialResult",
     "TrialSpec",
+    "merge_shard_files",
+    "shard_specs",
     "make_bent_function",
     "make_k_sparse",
     "make_random_boolean",

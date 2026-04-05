@@ -1,11 +1,11 @@
-"""Sphinx configuration for cs310-code documentation."""
+"""Sphinx configuration for mos-quantum-learning documentation."""
 
 import os
 import sys
 
 sys.path.insert(0, os.path.abspath(".."))
 
-project = "cs310-code"
+project = "mos-quantum-learning"
 author = "Alex"
 release = "0.1.0"
 
@@ -47,7 +47,7 @@ autodoc_mock_imports = [
 mathjax_path = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
 
 html_theme = "furo"
-html_title = "cs310-code"
+html_title = "mos-quantum-learning"
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build"]

@@ -19,6 +19,8 @@ def run_scaling_experiment(
     classical_samples_verifier: int = 3000,
     base_seed: int = 42,
     max_workers: int = 1,
+    shard_index: int | None = None,
+    num_shards: int | None = None,
 ) -> ExperimentResult:
     r"""Scaling experiment: completeness vs :math:`n` for random parities.
 
@@ -94,7 +96,10 @@ def run_scaling_experiment(
             )
 
     t0 = time.time()
-    trials = run_trials_parallel(specs, max_workers=max_workers, label="scaling")
+    trials = run_trials_parallel(
+        specs, max_workers=max_workers, label="scaling",
+        shard_index=shard_index, num_shards=num_shards,
+    )
     wall = time.time() - t0
 
     result = ExperimentResult(
