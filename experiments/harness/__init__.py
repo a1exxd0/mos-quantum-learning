@@ -81,6 +81,7 @@ Programmatic use::
    :doi:`10.4230/LIPIcs.ITCS.2024.24`.
 """
 
+from experiments.harness.ab_regime import run_ab_regime_experiment
 from experiments.harness.average_case import run_average_case_experiment
 from experiments.harness.bent import run_bent_experiment
 from experiments.harness.gate_noise import run_gate_noise_experiment
@@ -113,6 +114,7 @@ __all__ = [
     "make_random_parity",
     "make_single_parity",
     "make_sparse_plus_noise",
+    "run_ab_regime_experiment",
     "run_average_case_experiment",
     "run_bent_experiment",
     "run_gate_noise_experiment",
