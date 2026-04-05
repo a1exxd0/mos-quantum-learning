@@ -173,10 +173,15 @@ def make_k_sparse(
         phi_tilde_x = sum(
             coeffs[i] * _chi(int(indices[i]), x) for i in range(k)
         )
-        # Clip to [0, 1]: Dirichlet coefficients sum to 1 analytically so
+        # Dirichlet coefficients sum to 1 analytically so
         # |phi_tilde_x| <= 1 by the triangle inequality, but floating-point
         # roundoff in sum(coeffs) can exceed 1 by O(machine epsilon).
-        phi.append(np.clip((1.0 - phi_tilde_x) / 2.0, 0.0, 1.0))
+        val = (1.0 - phi_tilde_x) / 2.0
+        assert -1e-9 < val < 1.0 + 1e-9, (
+            f"make_k_sparse: phi[{x}] = {val} is too far outside [0, 1] "
+            f"(phi_tilde_x = {phi_tilde_x})"
+        )
+        phi.append(np.clip(val, 0.0, 1.0))
 
     target_s = int(indices[np.argmax(coeffs)])
     parseval_weight = float(np.sum(coeffs**2))
