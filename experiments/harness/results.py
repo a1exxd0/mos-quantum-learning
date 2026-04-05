@@ -15,6 +15,7 @@ from experiments.proto import (
     soundness_pb2,
     average_case_pb2,
     gate_noise_pb2,
+    k_sparse_pb2,
 )
 
 
@@ -240,6 +241,22 @@ class ExperimentResult:
                 ),
                 trials=trial_pbs,
             )
+        elif self.experiment_name == "k_sparse":
+            return k_sparse_pb2.KSparseExperimentResult(
+                metadata=metadata,
+                parameters=k_sparse_pb2.KSparseParameters(
+                    n_range=params["n_range"],
+                    k_values=params["k_values"],
+                    num_trials=params["num_trials"],
+                    epsilon=params["epsilon"],
+                    delta=params["delta"],
+                    qfs_shots=params["qfs_shots"],
+                    classical_samples_prover=params["classical_samples_prover"],
+                    classical_samples_verifier=params["classical_samples_verifier"],
+                    misclassification_samples=params["misclassification_samples"],
+                ),
+                trials=trial_pbs,
+            )
         else:
             raise ValueError(
                 f"No proto schema for experiment: {self.experiment_name}"
@@ -313,4 +330,11 @@ def _trial_to_proto(t: TrialResult) -> common_pb2.TrialResult:
     )
     if t.hypothesis_s is not None:
         pb.hypothesis_s = int(t.hypothesis_s)
+    if t.k is not None:
+        pb.k = int(t.k)
+    if t.hypothesis_coefficients is not None:
+        for s_idx, coeff in t.hypothesis_coefficients.items():
+            pb.hypothesis_coefficients[int(s_idx)] = float(coeff)
+    if t.misclassification_rate is not None:
+        pb.misclassification_rate = float(t.misclassification_rate)
     return pb

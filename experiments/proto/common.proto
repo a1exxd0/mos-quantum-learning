@@ -26,6 +26,9 @@ message TrialResult {
   double a_sq = 22;
   double b_sq = 23;
   string phi_description = 24;
+  optional int32 k = 25;
+  map<int32, double> hypothesis_coefficients = 26;
+  optional double misclassification_rate = 27;
 }
 
 message ExperimentMetadata {

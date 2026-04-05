@@ -835,6 +835,37 @@ class TestPackageImports:
 # ===================================================================
 
 
+class TestTrialResultKSparseProto:
+    """Tests for k-sparse protobuf serialization."""
+
+    def test_proto_roundtrip_k_sparse(self):
+        """k-sparse fields survive proto serialization."""
+        t = TrialResult(
+            n=4, seed=1, prover_time_s=0.1, qfs_shots=100,
+            qfs_postselected=50, postselection_rate=0.5, list_size=3,
+            prover_found_target=True, verifier_time_s=0.05,
+            verifier_samples=200, outcome="accept", accepted=True,
+            accumulated_weight=0.9, acceptance_threshold=0.85,
+            hypothesis_s=7, hypothesis_correct=True, total_copies=350,
+            total_time_s=0.15, epsilon=0.3, theta=0.3, delta=0.1,
+            a_sq=1.0, b_sq=1.0, phi_description="test",
+            k=2, hypothesis_coefficients={3: 0.6, 5: 0.4},
+            misclassification_rate=0.15,
+        )
+        pb = _trial_to_proto(t)
+        assert pb.k == 2
+        assert pb.hypothesis_coefficients[3] == pytest.approx(0.6)
+        assert pb.hypothesis_coefficients[5] == pytest.approx(0.4)
+        assert pb.misclassification_rate == pytest.approx(0.15)
+
+    def test_proto_parity_no_k_sparse(self, sample_trial_result):
+        """Parity trial proto has no k-sparse fields set."""
+        pb = _trial_to_proto(sample_trial_result)
+        assert not pb.HasField("k")
+        assert len(pb.hypothesis_coefficients) == 0
+        assert not pb.HasField("misclassification_rate")
+
+
 class TestTrialSpecKField:
     """Tests for the k-sparse routing field on TrialSpec."""
 
