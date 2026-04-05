@@ -88,7 +88,7 @@ def run_ab_regime_experiment(
                 phi, target_s, parseval_weight = make_sparse_plus_noise(n, trial_rng)
 
                 a_sq = max(parseval_weight - gap / 2.0, 0.01)
-                b_sq = parseval_weight + gap / 2.0
+                b_sq = min(parseval_weight + gap / 2.0, 1.0)
                 # Dominant coefficient is 0.7, so keep theta below it
                 theta = min(epsilon, 0.6)
 

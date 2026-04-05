@@ -905,6 +905,24 @@ class TestRunAbRegimeExperiment:
         for t in result.trials:
             assert t.a_sq == t.b_sq
 
+    def test_save_roundtrip(self, tmp_path):
+        from experiments.harness.ab_regime import run_ab_regime_experiment
+
+        result = run_ab_regime_experiment(
+            n_range=range(4, 5),
+            gaps=[0.0, 0.1],
+            num_trials=1,
+            qfs_shots=500,
+            classical_samples_prover=300,
+            classical_samples_verifier=500,
+            base_seed=42,
+            max_workers=1,
+        )
+        path = str(tmp_path / "ab_regime.pb")
+        result.save(path)
+        assert Path(path).exists()
+        assert Path(path).stat().st_size > 0
+
 
 # ===================================================================
 # CLI argument parsing
