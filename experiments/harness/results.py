@@ -18,6 +18,7 @@ from experiments.proto import (
     k_sparse_pb2,
     soundness_multi_pb2,
     theta_sensitivity_pb2,
+    ab_regime_pb2,
 )
 
 
@@ -283,6 +284,17 @@ class ExperimentResult:
                     qfs_shots=params["qfs_shots"],
                     classical_samples_prover=params["classical_samples_prover"],
                     classical_samples_verifier=params["classical_samples_verifier"],
+                ),
+                trials=trial_pbs,
+            )
+        elif self.experiment_name == "ab_regime":
+            return ab_regime_pb2.AbRegimeExperimentResult(
+                metadata=metadata,
+                parameters=ab_regime_pb2.AbRegimeParameters(
+                    n_range=params["n_range"],
+                    gaps=params["gaps"],
+                    num_trials=params["num_trials"],
+                    epsilon=params["epsilon"],
                 ),
                 trials=trial_pbs,
             )

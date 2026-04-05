@@ -1,0 +1,17 @@
+syntax = "proto3";
+package experiments;
+
+import "experiments/proto/common.proto";
+
+message AbRegimeParameters {
+  repeated int32 n_range = 1;
+  repeated double gaps = 2;
+  int32 num_trials = 3;
+  double epsilon = 4;
+}
+
+message AbRegimeExperimentResult {
+  ExperimentMetadata metadata = 1;
+  AbRegimeParameters parameters = 2;
+  repeated TrialResult trials = 3;
+}
