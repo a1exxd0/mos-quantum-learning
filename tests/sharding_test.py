@@ -20,7 +20,7 @@ from experiments.harness.sharding import (
     shard_specs,
 )
 from experiments.harness.worker import TrialSpec, run_trials_parallel
-from experiments.harness.phi import make_single_parity, make_random_parity
+from experiments.harness.phi import make_single_parity
 from experiments.harness.scaling import run_scaling_experiment
 
 
@@ -392,8 +392,12 @@ class TestShardedDeterminism:
         merged_seeds = sorted(t["seed"] for t in merged_json["trials"])
         assert baseline_seeds == merged_seeds
 
-        baseline_by_seed = {t["seed"]: t["hypothesisCorrect"] for t in baseline_json["trials"]}
-        merged_by_seed = {t["seed"]: t["hypothesisCorrect"] for t in merged_json["trials"]}
+        baseline_by_seed = {
+            t["seed"]: t["hypothesisCorrect"] for t in baseline_json["trials"]
+        }
+        merged_by_seed = {
+            t["seed"]: t["hypothesisCorrect"] for t in merged_json["trials"]
+        }
         assert baseline_by_seed == merged_by_seed
 
 

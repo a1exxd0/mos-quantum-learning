@@ -28,12 +28,15 @@ uv run python -m experiments.harness {scaling,bent,truncation,noise,soundness,so
 # Run experiments on the DCS cluster (SLURM)
 Submit a single experiment as a sharded job array, with an automatic merge step:
 ```sh
-bash experiments/slurm/submit.sh <experiment> <n_min> <n_max> <trials> <num_shards>
-# Example: 8 shards of the scaling experiment
+bash experiments/slurm/submit.sh <experiment> <n_min> <n_max> <trials> <num_shards> [partition] [seed]
+# Example: 8 shards of the scaling experiment on tiger (default)
 bash experiments/slurm/submit.sh scaling 4 16 24 8
+# Example: submit to falcon partition
+bash experiments/slurm/submit.sh scaling 4 16 24 8 falcon
 ```
-This submits a SLURM array job (one task per shard) to the `tiger` partition, then
-queues a dependent merge job that combines shard `.pb` files into the final result.
+This submits a SLURM array job (one task per shard) then queues a dependent merge job
+that combines shard `.pb` files into the final result. Partition defaults to `tiger`.
+CPU count is auto-adjusted for GPU partitions (falcon=12, gecko=16, eagle=6).
 
 Monitor and manage jobs:
 ```sh

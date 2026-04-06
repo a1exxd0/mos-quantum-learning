@@ -1,6 +1,6 @@
-# Implementation code for CS310 - Computer Science Project
+# Interactive Proofs for Quantum Learning
 
-In submission of my BSc Computer Science degree at the University of Warwick.
+Do not be fooled! This is **not** to the level of complexity of frontier ML. In fact, we are actually learning parity with noise! This is an NP-hard problem typically.
 
 # Quickstart for environment setup
 Assuming you have [UV](https://docs.astral.sh/uv/) installed:

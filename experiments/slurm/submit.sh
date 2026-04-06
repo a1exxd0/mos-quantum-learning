@@ -2,10 +2,11 @@
 # Submit a SLURM Job Array for an experiment, then queue a dependent merge job.
 #
 # Usage:
-#   bash experiments/slurm/submit.sh <experiment> <n_min> <n_max> <trials> <num_shards>
+#   bash experiments/slurm/submit.sh <experiment> <n_min> <n_max> <trials> <num_shards> [partition] [seed]
 #
-# Example:
+# Examples:
 #   bash experiments/slurm/submit.sh scaling 4 16 24 8
+#   bash experiments/slurm/submit.sh scaling 4 16 24 8 falcon
 #
 # This submits:
 #   1. An array job (0..num_shards-1) that runs the experiment shards
@@ -18,7 +19,8 @@ N_MIN="${2:?Missing n_min}"
 N_MAX="${3:?Missing n_max}"
 TRIALS="${4:?Missing trials}"
 NUM_SHARDS="${5:?Missing num_shards}"
-SEED="${6:-42}"
+PARTITION="${6:-tiger}"
+SEED="${7:-42}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PATTERN="${EXPERIMENT}_${N_MIN}_${N_MAX}_${TRIALS}"
@@ -32,12 +34,22 @@ fi
 # so these directories must exist at submission time.
 mkdir -p slurm_logs results
 
-echo "Submitting ${EXPERIMENT}: n=[${N_MIN},${N_MAX}], trials=${TRIALS}, shards=${NUM_SHARDS}"
+echo "Submitting ${EXPERIMENT}: n=[${N_MIN},${N_MAX}], trials=${TRIALS}, shards=${NUM_SHARDS}, partition=${PARTITION}"
+
+# Override cpus-per-task for partitions with fewer cores
+CPUS_FLAG=()
+case "${PARTITION}" in
+    eagle)          CPUS_FLAG=(--cpus-per-task=6)  ;;
+    falcon)         CPUS_FLAG=(--cpus-per-task=12) ;;
+    gecko)          CPUS_FLAG=(--cpus-per-task=16) ;;
+esac
 
 # Submit array job
 ARRAY_JOB_ID=$(
     EXPERIMENT="$EXPERIMENT" N_MIN="$N_MIN" N_MAX="$N_MAX" TRIALS="$TRIALS" SEED="$SEED" \
     sbatch --parsable \
+        --partition="${PARTITION}" \
+        "${CPUS_FLAG[@]}" \
         --array="0-$((NUM_SHARDS - 1))" \
         --job-name="mos-${EXPERIMENT}" \
         "${SCRIPT_DIR}/run_experiment.sbatch"
@@ -48,6 +60,7 @@ echo "  Array job submitted: ${ARRAY_JOB_ID} (${NUM_SHARDS} tasks)"
 MERGE_JOB_ID=$(
     PATTERN="$PATTERN" OUTPUT="$PATTERN" \
     sbatch --parsable \
+        --partition="${PARTITION}" \
         --dependency="afterok:${ARRAY_JOB_ID}" \
         "${SCRIPT_DIR}/merge_results.sbatch"
 )
