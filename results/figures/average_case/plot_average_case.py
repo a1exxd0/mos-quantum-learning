@@ -217,12 +217,12 @@ def plot_list_size_by_family(
         ax.plot(ns, sizes, marker=markers[i], color=colours[i],
                 label=FAMILY_LABELS[family], linewidth=1.5, markersize=5)
 
-    # Draw 4/theta^2 upper bound lines
+    # Draw 4/theta^2 Parseval bound (upper bound on detectable coefficients)
     for theta in sorted(theta_vals):
         bound = 4.0 / theta**2
         ax.axhline(bound, ls=":", color="grey", alpha=0.5)
         ax.text(ns[-1] + 0.3, bound,
-                r"$4/\theta^2$" + f" ($\\theta={theta}$)",
+                r"$4/\theta^2$" + f" ($\\theta={theta}$, Parseval)",
                 va="center", fontsize=7, color="grey")
 
     ax.set_xlabel("$n$ (number of qubits)")

@@ -484,7 +484,7 @@ def print_analysis(
             print(f"  n={n:2d}: never reaches 90%")
         prev_knee = knee
 
-    # 6. Anomaly: acceptance decreasing with more samples for small eps
+    # 6. Acceptance direction vs sample count (normal statistical convergence)
     print("\n--- Acceptance vs sample count direction ---")
     for eps in [0.1, 0.3, 0.5]:
         increasing = 0

@@ -202,7 +202,7 @@ def plot_acceptance_vs_n(summaries: dict, ks: list[int], ns: list[int]) -> None:
         ls="--",
         color="grey",
         alpha=0.6,
-        label=r"$1-\delta=0.9$ (Thm 9)",
+        label=r"$1-\delta=0.9$ (Thm 15)",
     )
     ax.set_xlabel("$n$ (number of qubits)")
     ax.set_ylabel("Acceptance rate")
@@ -273,7 +273,7 @@ def plot_list_size_vs_k(summaries: dict, ks: list[int], ns: list[int]) -> None:
                     color="red",
                     linewidth=1.5,
                     linestyle="--",
-                    label=r"$4/\theta^2$ (Thm 9 bound)",
+                    label=r"$4/\theta^2$ (Parseval bound)",
                 )
 
     ax.set_xticks(x)
@@ -348,7 +348,7 @@ def plot_misclassification_heatmap(
 
     # Reference line for epsilon
     ax.set_title(
-        r"Empirical misclassification rate ($\varepsilon=0.3$, Thm 9: $\leq 2\cdot\mathrm{opt}+\varepsilon$)"
+        r"Empirical misclassification rate ($\varepsilon=0.3$, Thm 15: $\leq 2\cdot\mathrm{opt}+\varepsilon$)"
     )
     fig.tight_layout()
     save(fig, "misclassification_heatmap")
@@ -451,7 +451,7 @@ def main() -> None:
     for k in ks:
         rates = [summaries[(k, n)]["acc_rate"] for n in ns if (k, n) in summaries]
         avg = sum(rates) / len(rates) if rates else 0
-        print(f"   k={k}: mean acceptance = {avg*100:.1f}%  (Thm 9 predicts >= 90%)")
+        print(f"   k={k}: mean acceptance = {avg*100:.1f}%  (Thm 15 predicts >= 90%)")
 
     print("\n2. List size growth:")
     for k in ks:
@@ -460,7 +460,7 @@ def main() -> None:
         bound = 4 / theta**2
         print(
             f"   k={k} (theta={theta:.4f}): median |L| range [{min(meds):.0f}, {max(meds):.0f}], "
-            f"4/theta^2 = {bound:.1f}"
+            f"4/theta^2 = {bound:.1f} (Parseval bound)"
         )
 
     print("\n3. Misclassification:")
@@ -471,7 +471,7 @@ def main() -> None:
         avg = sum(miscs) / len(miscs) if miscs else 0
         print(
             f"   k={k}: mean misclassification = {avg:.4f}  "
-            f"(Thm 9: <= 2*opt + eps = {0.3:.1f} for opt~0)"
+            f"(Thm 15: <= 2*opt + eps = {0.3:.1f} for opt~0)"
         )
 
     print("\n4. Weight threshold binding constraint:")

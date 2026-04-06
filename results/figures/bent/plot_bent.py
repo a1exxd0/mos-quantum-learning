@@ -65,10 +65,14 @@ def theoretical_list_size(n: int, theta: float) -> float:
     """Predicted |L| for bent functions at given n.
 
     For bent functions every coefficient has magnitude 2^{-n/2}.
-    QFS extraction threshold is theta/2.
-    If 2^{-n/2} >= theta/2, all 2^n coefficients are above threshold,
-    but the list-size cap from Thm 7 is 4/theta^2.
-    So predicted |L| = min(2^n, floor(4/theta^2)).
+    Prover extraction uses Corollary 5 threshold theta^2/4 on the
+    conditional distribution, which corresponds to a theta/2 boundary
+    on coefficient magnitude (via Theorem 4).
+    Guaranteed inclusion zone: |g_hat(s)| >= theta.
+    Guaranteed exclusion zone: |g_hat(s)| < theta/2.
+    Uncertain zone: theta/2 <= |g_hat(s)| < theta.
+    The Parseval bound caps |L| at 4/theta^2.
+    So predicted |L| = min(2^n, floor(4/theta^2)) when above threshold.
     If 2^{-n/2} < theta/2, no coefficients meet the threshold -> |L| = 0.
     """
     coeff_mag = 2 ** (-n / 2)
@@ -202,7 +206,7 @@ def plot_list_size_growth(agg: dict[int, dict], ns: list[int]) -> None:
     # Replace 0 with 0.5 for plotting on log scale
     plot_theory = [max(t, 0.5) for t in theory]
     ax.plot(ns, plot_theory, "s--", color=colours[1], linewidth=1.5,
-            markersize=6, label=r"Theory: $\min(2^n,\, 4/\theta^2)$", zorder=4)
+            markersize=6, label=r"Theory: $\min(2^n,\, 4/\theta^2)$ (Parseval bound)", zorder=4)
 
     # 2^n curve for reference
     two_n = [2**n for n in ns]
@@ -213,17 +217,17 @@ def plot_list_size_growth(agg: dict[int, dict], ns: list[int]) -> None:
     ax.axhline(1, ls="-.", color=colours[2], alpha=0.7, linewidth=1.2,
                label=r"Single parity $|L| = 1$")
 
-    # 4/theta^2 cap
+    # 4/theta^2 Parseval bound cap
     cap = 4 / THETA**2
     ax.axhline(cap, ls="--", color=colours[3], alpha=0.5, linewidth=1,
-               label=rf"$4/\theta^2 \approx {cap:.0f}$")
+               label=rf"$4/\theta^2 \approx {cap:.0f}$ (Parseval bound)")
 
     # Crossover annotation
     x_cross = crossover_n(THETA)
     ax.axvline(x_cross, ls=":", color="red", alpha=0.6, linewidth=1)
     ax.annotate(
         rf"Crossover $n \approx {x_cross:.1f}$" + "\n"
-        + rf"$2^{{-n/2}} = \theta/2$",
+        + rf"$2^{{-n/2}} = \theta/2$ (exclusion boundary)",
         xy=(x_cross, 3), fontsize=8,
         xytext=(x_cross + 1.5, 8),
         arrowprops=dict(arrowstyle="->", color="red", alpha=0.6),

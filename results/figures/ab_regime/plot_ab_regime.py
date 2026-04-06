@@ -185,7 +185,7 @@ def plot_acceptance_vs_gap(
     ax.legend(fontsize=7, loc="lower right")
     ax.set_title(
         r"$a^2 \neq b^2$ regime: acceptance rate vs gap width"
-        "\n(Def 14, Thm 11 distributional verification)",
+        "\n(Def 14, Thm 12 distributional verification)",
         fontsize=10,
     )
 
@@ -204,7 +204,7 @@ def plot_threshold_margin(
     """Line plot: median (accumulated_weight - acceptance_threshold) vs gap.
 
     Positive margin = accepted, negative = rejected.
-    Overlays the theoretical threshold a^2 - eps^2/8 from Thm 11.
+    Overlays the theoretical threshold a^2 - eps^2/8 from Thm 12.
     """
     # Representative n values
     if len(ns) <= 5:
@@ -258,7 +258,7 @@ def plot_threshold_margin(
     ax.legend(fontsize=7, loc="upper left")
     ax.set_title(
         r"$a^2 \neq b^2$ regime: threshold margin vs gap"
-        "\n(Thm 11: threshold = $a^2 - \\varepsilon^2/8$; wider gap lowers threshold)",
+        "\n(Thm 12: threshold = $a^2 - \\varepsilon^2/8$; wider gap lowers threshold)",
         fontsize=10,
     )
 
@@ -275,7 +275,7 @@ def plot_accuracy_bound(
     gaps: list[float],
 ) -> None:
     """Plot the acceptance threshold (a^2 - eps^2/8) vs gap, comparing empirical
-    thresholds with the theoretical prediction from Thm 11/13.
+    thresholds with the theoretical prediction from Thm 12/13.
 
     Thm 13 necessity condition: eps >= 2*sqrt(b^2 - a^2).
     Equivalently, the protocol can only succeed when gap <= (eps/2)^2.
@@ -283,7 +283,7 @@ def plot_accuracy_bound(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
 
     # --- Left panel: acceptance threshold vs gap ---
-    # The theoretical threshold from Thm 11: a^2 - eps^2/8
+    # The theoretical threshold from Thm 12: a^2 - eps^2/8
     # where a^2 = pw - gap/2 (pw ~ 0.52 for sparse_plus_noise)
     pw = 0.52  # approximate Parseval weight
     eps = 0.3
@@ -292,7 +292,7 @@ def plot_accuracy_bound(
     a_sq_theory = np.maximum(pw - gap_fine / 2, 0.01)
     threshold_theory = a_sq_theory - eps**2 / 8
 
-    ax1.plot(gap_fine, threshold_theory, "r-", linewidth=2, label=r"Thm 11: $a^2 - \varepsilon^2/8$")
+    ax1.plot(gap_fine, threshold_theory, "r-", linewidth=2, label=r"Thm 12: $a^2 - \varepsilon^2/8$")
     ax1.axhline(0, ls=":", color="black", alpha=0.5, linewidth=0.8)
 
     # Empirical median thresholds (should match since they use the same formula)
@@ -320,7 +320,7 @@ def plot_accuracy_bound(
     ax1.set_xlabel("Gap $(b^2 - a^2)$")
     ax1.set_ylabel("Acceptance threshold")
     ax1.legend(fontsize=7)
-    ax1.set_title("Acceptance threshold vs gap\n(Thm 11 weight check)", fontsize=10)
+    ax1.set_title("Acceptance threshold vs gap\n(Thm 12 weight check)", fontsize=10)
 
     # --- Right panel: Thm 13 necessity bound ---
     # eps >= 2*sqrt(gap) is necessary. Plot empirical acceptance overlaid
@@ -442,10 +442,10 @@ def main() -> None:
 
     eps = 0.3
     critical_gap = (eps / 2) ** 2
-    print(f"Theoretical context (Thms 11, 13; Def 14; Prop 2):")
+    print(f"Theoretical context (Thms 12, 13; Def 14; Prop 2):")
     print(f"  epsilon = {eps}")
     print(f"  Thm 13 necessity bound: gap <= (eps/2)^2 = {critical_gap:.4f}")
-    print(f"  Thm 11 threshold: a^2 - eps^2/8 (uses LOWER bound a^2)")
+    print(f"  Thm 12 threshold: a^2 - eps^2/8 (uses LOWER bound a^2)")
     print()
 
     # Analyse acceptance vs gap for each n
@@ -465,15 +465,15 @@ def main() -> None:
     print("1. Gap effect on acceptance (Def 14 promise loosening):")
     print("   Wider gaps INCREASE acceptance because the threshold a^2 - eps^2/8")
     print("   decreases (a^2 shrinks as gap widens). The weight check becomes")
-    print("   easier to pass, not harder. This is counter-intuitive but correct:")
-    print("   the verifier compensates for uncertainty by lowering the bar.")
+    print("   easier to pass, not harder. This is the expected behaviour:")
+    print("   as the promise weakens (gap widens), the verifier lowers the bar.")
     print()
 
     # Tightness of Thm 13 bound
     print(f"2. Thm 13 tightness (eps >= 2*sqrt(gap)):")
     print(f"   Critical gap = {critical_gap:.4f} is far below all tested gaps")
     print(f"   (min tested gap = {gaps[0]}). Yet the protocol succeeds at all")
-    print(f"   tested gaps, indicating the threshold formula (Thm 11) remains")
+    print(f"   tested gaps, indicating the threshold formula (Thm 12) remains")
     print(f"   effective even when the Thm 13 bound on eps is violated.")
     print(f"   The bound may be loose for the specific functions tested.")
     print()

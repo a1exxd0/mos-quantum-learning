@@ -198,7 +198,7 @@ def plot_completeness(stats: dict[int, dict], ns: list[int], delta: float) -> No
 
     # Theoretical guarantee: 1 - delta
     ax.axhline(1 - delta, ls="--", color="grey", alpha=0.6,
-               label=rf"$1-\delta = {1 - delta:.1f}$ (Thm 8)")
+               label=rf"$1-\delta = {1 - delta:.1f}$ (Thm 12)")
 
     ax.set_xlabel("$n$ (number of bits)")
     ax.set_ylabel("Rate")
@@ -264,7 +264,7 @@ def plot_resource_scaling(
     ax1.set_xticks(ns)
 
     # Theoretical bound: copies ~ C * n * log(1/(delta*theta^2)) / theta^4
-    # From Thm 8 with QFS shots + verifier samples
+    # From Thm 12 with QFS shots + verifier samples
     delta = params.get("delta", 0.1)
     theta = params.get("epsilon", 0.3)  # theta = epsilon in functional case
     theory_factor = np.array([n_val * math.log(1.0 / (delta * theta**2)) / theta**4
@@ -312,11 +312,12 @@ def plot_list_size(stats: dict[int, dict], ns: list[int], params: dict) -> None:
                 color=colours[0], capsize=4, markersize=6,
                 label=r"Median $|L|$ (IQR)")
 
-    # Theoretical upper bound: 16/theta^2 (Parseval bound, Corollary 5 / Thm 8)
+    # Parseval bound on number of large Fourier coefficients: 4/theta^2
+    # (distinct from the verifier list-size bound 64*b^2/theta^2 in Thm 12 Step 3)
     theta = params.get("epsilon", 0.3)
-    upper_bound = 16.0 / theta**2
+    upper_bound = 4.0 / theta**2
     ax.axhline(upper_bound, ls="--", color="grey", alpha=0.6,
-               label=rf"$16/\theta^2 = {upper_bound:.1f}$ (Thm 8 bound)")
+               label=rf"$4/\theta^2 = {upper_bound:.1f}$ (Parseval bound)")
 
     # Expected for single parities: |L| = 1
     ax.axhline(1.0, ls=":", color=colours[1], alpha=0.7,

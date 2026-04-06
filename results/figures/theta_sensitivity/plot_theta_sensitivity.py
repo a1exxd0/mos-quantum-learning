@@ -182,7 +182,7 @@ def plot_list_size_vs_theta(
     theta_fine = np.linspace(thetas[0], thetas[-1], 200)
     bound = 4.0 / theta_fine**2
     ax.plot(theta_fine, bound, "k--", lw=1.5, alpha=0.6,
-            label=r"$4/\theta^2$ (Thm 7 bound)")
+            label=r"$4/\theta^2$ (Parseval bound)")
 
     for i, n in enumerate(representative_ns):
         medians = []
