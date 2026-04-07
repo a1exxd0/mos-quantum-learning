@@ -113,6 +113,7 @@ def run_soundness_multi_experiment(
                             seed=seed,
                             phi_description=f"soundness_multi_{strategy}_k={k}",
                             dishonest_strategy=strategy,
+                            k=k,
                         )
                     )
 

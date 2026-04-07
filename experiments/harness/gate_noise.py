@@ -75,7 +75,7 @@ def run_gate_noise_experiment(
     ExperimentResult
     """
     if gate_noise_rates is None:
-        gate_noise_rates = [0.0, 0.001, 0.005, 0.01, 0.02, 0.05, 0.1]
+        gate_noise_rates = [0.0, 0.0001, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
 
     print(
         f"=== Gate Noise: n in {list(n_range)}, p in {gate_noise_rates}, "

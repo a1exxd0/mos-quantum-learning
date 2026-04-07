@@ -1,0 +1,14 @@
+n,empirical_eta_50pct,theoretical_eta_threshold,acceptance_at_max_eta,match_within_0.05
+4,none,0.4470,1.00,no_breakdown
+5,none,0.4470,1.00,no_breakdown
+6,none,0.4470,1.00,no_breakdown
+7,none,0.4470,1.00,no_breakdown
+8,none,0.4470,1.00,no_breakdown
+9,none,0.4470,0.98,no_breakdown
+10,none,0.4470,0.97,no_breakdown
+11,none,0.4470,0.98,no_breakdown
+12,none,0.4470,0.95,no_breakdown
+13,none,0.4470,0.94,no_breakdown
+14,none,0.4470,0.93,no_breakdown
+15,none,0.4470,0.94,no_breakdown
+16,none,0.4470,0.93,no_breakdown

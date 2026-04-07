@@ -83,9 +83,14 @@ class TrialSpec:
 
 def _compute_misclassification_rate(state, hypothesis, seed, num_samples=1000):
     """Compute empirical P[h(x) != y] on fresh classical samples."""
+    from ql.verifier import FourierSparseHypothesis
+
     rng = default_rng(seed)
     xs, ys = state.sample_classical_batch(num_samples=num_samples, rng=rng)
-    predictions = hypothesis.evaluate_batch(xs, rng=rng)
+    if isinstance(hypothesis, FourierSparseHypothesis):
+        predictions = hypothesis.evaluate_batch(xs, rng=rng)
+    else:
+        predictions = hypothesis.evaluate_batch(xs)
     return float(np.mean(predictions != ys))
 
 
@@ -336,6 +341,11 @@ def _run_dishonest_trial(spec: TrialSpec, state) -> TrialResult:
     the verifier against it.  Strategies are registered in
     :data:`_DISHONEST_STRATEGIES`.
 
+    When ``spec.k`` is set and ``> 1``, the verifier uses
+    :meth:`~ql.verifier.MoSVerifier.verify_fourier_sparse` (with the
+    k-sparse acceptance threshold :math:`a^2 - \varepsilon^2/(128k^2)`)
+    instead of :meth:`~ql.verifier.MoSVerifier.verify_parity`.
+
     Parameters
     ----------
     spec : TrialSpec
@@ -349,7 +359,7 @@ def _run_dishonest_trial(spec: TrialSpec, state) -> TrialResult:
     TrialResult
     """
     from ql.prover import SpectrumApproximation
-    from ql.verifier import MoSVerifier
+    from ql.verifier import FourierSparseHypothesis, MoSVerifier
     from mos.sampler import QFSResult
 
     n = spec.n
@@ -367,15 +377,48 @@ def _run_dishonest_trial(spec: TrialSpec, state) -> TrialResult:
     fake_msg = strategy_fn(n, rng, target_s, epsilon, spec.theta, spec.phi, dummy_sa, dummy_qfs)
 
     verifier = MoSVerifier(state, seed=spec.seed + 1_000_000)
-    vresult = verifier.verify_parity(
-        fake_msg,
-        epsilon=epsilon,
-        delta=spec.delta,
-        theta=spec.theta,
-        a_sq=spec.a_sq,
-        b_sq=spec.b_sq,
-        num_samples=spec.classical_samples_verifier,
-    )
+
+    if spec.k is not None and spec.k > 1:
+        vresult = verifier.verify_fourier_sparse(
+            fake_msg,
+            epsilon=epsilon,
+            k=spec.k,
+            delta=spec.delta,
+            theta=spec.theta,
+            a_sq=spec.a_sq,
+            b_sq=spec.b_sq,
+            num_samples=spec.classical_samples_verifier,
+        )
+    else:
+        vresult = verifier.verify_parity(
+            fake_msg,
+            epsilon=epsilon,
+            delta=spec.delta,
+            theta=spec.theta,
+            a_sq=spec.a_sq,
+            b_sq=spec.b_sq,
+            num_samples=spec.classical_samples_verifier,
+        )
+
+    # --- Extract hypothesis and compute misclassification if accepted ---
+    hyp_s = None
+    hyp_coefficients = None
+    misclass_rate = None
+
+    if vresult.accepted and vresult.hypothesis is not None:
+        if isinstance(vresult.hypothesis, FourierSparseHypothesis):
+            hyp_coefficients = dict(vresult.hypothesis.coefficients)
+            hyp_s = max(hyp_coefficients, key=lambda s: abs(hyp_coefficients[s]))
+            misclass_rate = _compute_misclassification_rate(
+                state, vresult.hypothesis, spec.seed + 2_000_000,
+                num_samples=spec.misclassification_samples or 1000,
+            )
+        else:
+            hyp_s = vresult.hypothesis.s
+            misclass_rate = _compute_misclassification_rate(
+                state, vresult.hypothesis, spec.seed + 2_000_000,
+                num_samples=spec.misclassification_samples or 1000,
+            )
 
     return TrialResult(
         n=n,
@@ -392,8 +435,8 @@ def _run_dishonest_trial(spec: TrialSpec, state) -> TrialResult:
         accepted=vresult.accepted,
         accumulated_weight=vresult.accumulated_weight,
         acceptance_threshold=vresult.acceptance_threshold,
-        hypothesis_s=vresult.hypothesis.s if vresult.accepted else None,
-        hypothesis_correct=False,
+        hypothesis_s=hyp_s,
+        hypothesis_correct=(hyp_s == target_s) if hyp_s is not None else False,
         total_copies=spec.classical_samples_verifier,
         total_time_s=0.0,
         epsilon=epsilon,
@@ -402,6 +445,9 @@ def _run_dishonest_trial(spec: TrialSpec, state) -> TrialResult:
         a_sq=spec.a_sq,
         b_sq=spec.b_sq,
         phi_description=f"soundness_{spec.dishonest_strategy}",
+        k=spec.k,
+        hypothesis_coefficients=hyp_coefficients,
+        misclassification_rate=misclass_rate,
     )
 
 
