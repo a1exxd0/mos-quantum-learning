@@ -62,9 +62,13 @@ class TrialSpec:
     #: Human-readable label for the distribution.
     phi_description: str
     #: If not ``None``, the worker runs a dishonest prover with this
-    #: strategy instead of the honest protocol.  One of
-    #: ``"random_list"``, ``"wrong_parity"``, ``"partial_list"``, or
-    #: ``"inflated_list"``.
+    #: strategy instead of the honest protocol.  Single-element
+    #: strategies (used by :func:`run_soundness_experiment`):
+    #: ``"random_list"``, ``"wrong_parity"``, ``"partial_list"``,
+    #: ``"inflated_list"``.  Multi-element strategies (used by
+    #: :func:`run_soundness_multi_experiment`): ``"partial_real"``,
+    #: ``"diluted_list"``, ``"shifted_coefficients"``,
+    #: ``"subset_plus_noise"``.
     dishonest_strategy: Optional[str] = None
     #: Gate-level depolarising noise rate :math:`p`.  When set, the
     #: worker constructs a Qiskit ``NoiseModel`` with depolarising
@@ -288,7 +292,16 @@ def _strategy_diluted_list(n, rng, target_s, epsilon, theta, phi, dummy_sa, dumm
     from ql.prover import ProverMessage
     heavy = _extract_spectrum(phi)
     heavy_sorted = sorted(heavy, key=lambda x: abs(x[1]), reverse=True)
-    n_keep = max(1, len(heavy_sorted) // 4)
+    # Audit fix m4 (audit/soundness_multi.md): the previous formula
+    # ``n_keep = max(1, len(heavy_sorted) // 4)`` was always 1 for
+    # k <= 4, so the strategy was effectively "keep one weakest" — its
+    # docstring described "keep all real" which the code never did.
+    # We now keep ``max(1, k // 2)`` of the weakest real coefficients,
+    # which matches the "diluted signal" intuition (the prover knows
+    # part of the spectrum but not all of it).  The verifier still
+    # rejects because accumulated weight on the kept subset is
+    # strictly below the true Parseval mass ``pw``.
+    n_keep = max(1, len(heavy_sorted) // 2)
     kept_indices = [s for s, _ in heavy_sorted[-n_keep:]]
     used = {s for s, _ in heavy}
     padding_candidates = [s for s in range(2**n) if s not in used]

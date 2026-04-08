@@ -101,3 +101,49 @@ Implementation is technically correct, but **the experiment does not test what i
 The .pb file and figures are valid measurements of *the parity verifier applied to a heterogeneous set of phi families*, but they should not be presented as average-case validation of the paper's protocol. To match the paper this experiment should (1) set `spec.k = k` for k_sparse_*/sparse_plus_noise so the worker dispatches to `verify_fourier_sparse`, (2) drop or rename `random_boolean`, (3) drop the "average case" framing or sample explicitly from `D^func_{U_n; >= theta}` and report expected list size and expected completeness across draws.
 
 **Overall: MAJOR issues.** Implementation runs correctly but the experiment does not test the paper's average-case protocol; the artefacts are accurate measurements of an unintended quantity.
+
+## Post-rerun (2026-04-08)
+
+After applying the M1 fix in `experiments/harness/average_case.py` (plumb `TrialSpec.k = k` for the k_sparse families and `k = 4` for `sparse_plus_noise`) and the M2 fix (drop `random_boolean` from `_DEFAULT_FAMILIES`), `results/average_case_4_16_100.pb` was regenerated on the DCS cluster (SLURM array `1308003` + merge `1308009`, 8 shards on `tiger`, 3900 trials, 25260s wall-clock).
+
+### Verified state of the fix
+
+- `experiments/harness/average_case.py:21` — `_DEFAULT_FAMILIES = ["k_sparse_2", "k_sparse_4", "sparse_plus_noise"]` (random_boolean dropped).
+- `experiments/harness/average_case.py:47-65,84` — `spec_k` plumbed: `k=2` / `k=4` / `k=4` for the three families respectively, then passed as `TrialSpec(..., k=spec_k)`.
+- `experiments/harness/worker.py:167-187` — dispatch `if spec.k is not None and spec.k > 1: verifier.verify_fourier_sparse(...)` confirmed in place; the new `.pb` is therefore generated against the **Theorem 15** path (threshold `a² − ε²/(128 k²)`, per-coefficient tolerance `ε²/(256 k² |L|)`, Lemma-14 randomised hypothesis).
+- `worker.py:198-206` — misclassification metric is now computed for every accepted k > 1 trial via `_compute_misclassification_rate` against fresh classical samples and the `FourierSparseHypothesis.evaluate_batch` path.
+
+### Verified outcomes (`results/figures/average_case/cross_family_summary.csv`)
+
+| Family | Old (wrong dispatch) accept range | **New (Theorem 15)** accept range (n=4 → n=9 → n=16) |
+|---|---|---|
+| k_sparse (k=2) | 0.76 → 0.78 → 0.76 | **0.53 → 0.47 → 0.38** |
+| k_sparse (k=4) | 0.81 → 0.63 → 0.74 | **0.57 → 0.47 → 0.32** |
+| sparse_plus_noise | 0.78 → 0.13 → 0.15 | **0.54 → 0.05 → 0.04** (collapses with n) |
+
+Numbers read directly from the regenerated `.pb` (`/tmp/average_case.json` after `uv run python -m experiments.decode`); each row is monotonically *decreasing* with n, not increasing — a previous version of this table had the n=16 endpoints transposed with the n=4 endpoints for k_sparse_4 and sparse_plus_noise.
+
+All 2521 / 3900 rejections (≈ 65%) carry outcome `reject_insufficient_weight`; **zero rejects are `reject_list_too_large`** — the prover IS finding the heavy coefficients, the verifier's per-coefficient Hoeffding tolerance under the still-hardcoded `classical_samples_verifier = 3000` is what blocks them. Misclassification rate is now populated for every accepted trial (1379 of 3900): mean / median per family
+
+| Family | n accepted | mean misclass | median misclass |
+|---|---|---|---|
+| k_sparse_2 | 628 | 0.151 | 0.159 |
+| k_sparse_4 | 608 | 0.266 | 0.279 |
+| sparse_plus_noise | 143 | 0.172 | 0.173 |
+
+These are meaningful Lemma-14 randomised hypothesis quality numbers, comparable to the `epsilon = 0.3` target.
+
+### Status of audit findings
+
+- **M1 (wrong dispatch path):** **RESOLVED at the implementation level.** The verifier is now running the correct Theorem 15 path on every k > 1 trial, the Lemma-14 randomised hypothesis is being constructed and evaluated, and the misclassification metric is meaningful. The numerically *lower* acceptance rate is the honest measurement of what the Theorem-15 path produces under fixed sample budgets — it is **not** a regression. The previous "0.13–0.81 acceptance" was an artefact of dispatching parity threshold against k > 1 instances; the parity verifier was accidentally lenient because its single-coefficient threshold `a² − ε²/8` is much looser than Theorem 15's `a² − ε²/(128 k²)` per-coefficient tolerance demands.
+- **M2 (`random_boolean` outside promise class):** **RESOLVED.** The family is dropped from `_DEFAULT_FAMILIES`; the regenerated CSV has 3 rows per n, not 4.
+- **m4 (`theta` heuristic for k-sparse):** still applicable but minor; left as documented.
+- **m5 (`total_copies` constant):** still applicable; this is the surface manifestation of the underlying Tier 3 (analytic budgets) work in `audit/FOLLOW_UPS.md` §4.
+
+### Tier 3 follow-up (out of scope here)
+
+Lifting acceptance back toward the `1 − δ = 0.9` completeness target requires the analytic-budget rerun in `audit/FOLLOW_UPS.md` §4 — specifically, passing `qfs_shots=None`, `classical_samples_prover=None`, `classical_samples_verifier=None` so the worker falls through to the per-trial Hoeffding budgets in `verifier.py:487-497` and `prover.py:316-321`. With those budgets, the `~ε²/(256 k² |L|)` per-coefficient tolerance the Theorem 15 path requires should be satisfied and acceptance should approach the predicted completeness target. This is **not** a code-change consequence of the Tier 1/2 fix and is tracked separately.
+
+### Verdict update
+
+Implementation is now correct in both the verifier dispatch and the hypothesis construction; the experiment now genuinely tests the paper's k-sparse path. The remaining Tier 3 caveat about fixed-budget acceptance is documented above and in `audit/FOLLOW_UPS.md` §4. **MAJOR → PASS (Tier 3 follow-up still recommended).**

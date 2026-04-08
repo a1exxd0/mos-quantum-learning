@@ -42,9 +42,47 @@ def run_truncation_experiment(
     verifier's coefficient estimates pushes the accumulated weight
     below :math:`\tau`, causing rejection even for honest provers.
     At large :math:`\varepsilon`, :math:`\tau` drops and the check
-    becomes lenient.  The 2D grid
-    :math:`(\varepsilon \times m_V)` maps the tradeoff surface
-    predicted by Theorem 12.
+    becomes lenient.
+
+    .. warning::
+
+       **Sub-Hoeffding regime — figures are NOT Theorem 12 boundary
+       measurements.** The default grid
+       :math:`m_V \in \{50, \dots, 3000\}` lies 3-4 orders of magnitude
+       *below* the Theorem 12 verifier sample-complexity prescription
+       :math:`m \ge (2/\mathrm{tol}^2)\,\log(4|L|/\delta)` with
+       :math:`\mathrm{tol} = \varepsilon^2/(16|L|)` (see
+       ``ql/verifier.py:493``).  For :math:`|L|=1` and :math:`\delta=0.1`
+       the analytic minimum is roughly :math:`1.9 \times 10^7` at
+       :math:`\varepsilon=0.1` and :math:`3.0 \times 10^4` at
+       :math:`\varepsilon=0.5`, so the grid never reaches the asymptotic
+       regime that the threshold :math:`\tau = a^2 - \varepsilon^2/8`
+       was designed for.
+
+       Consequently the visible "knees" for :math:`\varepsilon \le 0.3`
+       are **squaring-bias artefacts** of the unbiased estimator
+       :math:`\widehat\xi(s)^2 = \widehat{\varphi}(s)^2 +
+       \mathrm{Var}(\widehat\xi)`, whose bias :math:`\approx 0.51/m_V`
+       is comparable to or exceeds the acceptance margin
+       :math:`\varepsilon^2/8`.  Some rows in
+       ``truncation_summary.csv`` therefore show
+       ``accept@50 > accept@3000`` (acceptance *decreasing* with
+       budget), which would be impossible in the true Hoeffding regime.
+
+       Additionally, the prover budgets ``qfs_shots=2000`` and
+       ``classical_samples_prover=1000`` sit far below the
+       Corollary 5 prescription, so the figures partly reflect
+       prover-side QFS failure modes (the prover may fail to place
+       the target string into :math:`L` at small :math:`\varepsilon`
+       and large :math:`n`) rather than pure verifier-side truncation.
+
+       The 2D grid :math:`(\varepsilon \times m_V)` is therefore best
+       interpreted as a **non-asymptotic / sub-Hoeffding feasibility
+       sweep** at fixed prover and verifier budgets, *not* as a
+       measurement of the tradeoff surface predicted by Theorem 12.
+       See ``audit/truncation.md`` (M1, M2) and ``audit/FOLLOW_UPS.md``
+       for the rerun specifications that would actually cross the
+       Theorem 12 boundary.
 
     Parameters
     ----------

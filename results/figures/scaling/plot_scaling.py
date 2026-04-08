@@ -248,33 +248,38 @@ def plot_postselection(stats: dict[int, dict], ns: list[int]) -> None:
 def plot_resource_scaling(
     stats: dict[int, dict], ns: list[int], params: dict,
 ) -> None:
-    """Dual-axis line plot: median total copies & wall-clock time vs n."""
-    fig, ax1 = plt.subplots(figsize=(6, 4))
+    """Dual-axis line plot: median total copies & wall-clock time vs n.
+
+    .. note::
+
+       Audit fix M1 (audit/scaling.md): the previous version overlaid
+       a fitted theoretical curve ``C * n * log(1/(delta*theta^2)) / theta^4``
+       on a *constant* y-series (total_copies = qfs_shots +
+       classical_samples_prover + classical_samples_verifier = 6000 at
+       every n), creating the misleading impression that resource
+       scaling was being measured.  In fact all three sample budgets
+       are hard-coded constants, so the figure plots a flat
+       constant-vs-n curve.  The fitted overlay has been removed; the
+       title and an annotation now make the fixed-budget framing
+       explicit.  Wall-clock time growth is a 2^(n+1) statevector
+       simulator artefact, not a protocol cost.
+    """
+    fig, ax1 = plt.subplots(figsize=(6.4, 4.4))
     colours = sns.color_palette("colorblind", 3)
 
     copies = [stats[n]["median_copies"] for n in ns]
     times = [stats[n]["median_time"] for n in ns]
 
     # Primary axis: copies (log scale)
-    ax1.plot(ns, copies, "o-", color=colours[0], label="Median total copies", markersize=5)
+    ax1.plot(
+        ns, copies, "o-", color=colours[0],
+        label="Median total copies (fixed budget)", markersize=5,
+    )
     ax1.set_xlabel("$n$ (number of bits)")
     ax1.set_ylabel("Total copies", color=colours[0])
     ax1.set_yscale("log")
     ax1.tick_params(axis="y", labelcolor=colours[0])
     ax1.set_xticks(ns)
-
-    # Theoretical bound: copies ~ C * n * log(1/(delta*theta^2)) / theta^4
-    # From Thm 12 with QFS shots + verifier samples
-    delta = params.get("delta", 0.1)
-    theta = params.get("epsilon", 0.3)  # theta = epsilon in functional case
-    theory_factor = np.array([n_val * math.log(1.0 / (delta * theta**2)) / theta**4
-                              for n_val in ns])
-    # Fit constant C from data
-    copies_arr = np.array(copies)
-    C_fit = np.median(copies_arr / theory_factor)
-    theory_copies = C_fit * theory_factor
-    ax1.plot(ns, theory_copies, "--", color=colours[0], alpha=0.5,
-             label=rf"$C \cdot n \log(1/\delta\theta^2)/\theta^4$, $C={C_fit:.1f}$")
 
     # Secondary axis: time
     ax2 = ax1.twinx()
@@ -289,7 +294,17 @@ def plot_resource_scaling(
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, fontsize=7, loc="upper left")
 
-    ax1.set_title("Resource scaling vs $n$")
+    ax1.set_title("Fixed-budget feasibility (NOT measured n-scaling)")
+    fig.text(
+        0.5, -0.04,
+        "Sample budgets are hard-coded constants (qfs_shots=2000, "
+        "classical_samples_prover=1000,\n"
+        "classical_samples_verifier=3000), so total copies is constant "
+        "6000 across all $n$ by construction.\n"
+        "Wall-clock growth is a $2^{n+1}$ statevector simulator artefact, "
+        "not a protocol cost.",
+        ha="center", va="top", fontsize=7, style="italic",
+    )
     save(fig, "resource_scaling")
 
 

@@ -39,6 +39,28 @@ def run_scaling_experiment(
     classical examples (Theorem 12).  The distribution class promise is
     :math:`a^2 = b^2 = 1` (functional case, Theorem 8).
 
+    .. note::
+
+       **Hard-coded sample budgets bypass the analytic formulas.** The
+       defaults ``qfs_shots=2000``, ``classical_samples_prover=1000`` and
+       ``classical_samples_verifier=3000`` are *constants*, not values
+       derived from the Hoeffding budgets in
+       :func:`ql.verifier.MoSVerifier._verify_core` (lines 487-497) or
+       the Corollary 5 formula in :meth:`ql.prover.MoSProver.run_protocol`
+       (lines 316-321). Consequently ``total_copies = qfs_shots +
+       classical_samples_prover + classical_samples_verifier = 6000`` is
+       constant across every :math:`n` in the sweep by construction, and
+       the experiment tests "this fixed 6000-copy budget suffices on
+       single-parity targets up to :math:`n=16`" rather than the
+       n-independence of Theorem 12's analytic verifier sample formula.
+
+       To actually validate the n-independence claim of Theorem 12, the
+       sweep would need to be re-run with ``qfs_shots=None``,
+       ``classical_samples_prover=None`` and
+       ``classical_samples_verifier=None`` so the worker falls through to
+       the per-trial analytic budgets. See ``audit/scaling.md`` (M1, M2)
+       and ``audit/FOLLOW_UPS.md``.
+
     Parameters
     ----------
     n_range : range

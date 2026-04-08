@@ -44,10 +44,43 @@ def run_noise_sweep_experiment(
     empirical acceptance and correctness rates as functions of
     :math:`\eta`, testing the noise-robust verification results of §6.2.
 
-    The Fourier resolution threshold :math:`\vartheta` is adapted per
-    noise level: :math:`\vartheta = \min(\varepsilon,\,
-    0.9 \cdot (1 - 2\eta))` to avoid setting the extraction threshold
-    above the signal magnitude.
+    The Fourier resolution threshold :math:`\vartheta` is held
+    **fixed** at :math:`\vartheta = \varepsilon` across the entire
+    sweep (audit fix MAJOR-3 in ``audit/noise_sweep.md``).  Previously
+    :math:`\vartheta` was adapted per noise level
+    (:math:`\vartheta = \min(\varepsilon,\, 0.9 \cdot (1 - 2\eta))`),
+    which silently varied two parameters along the same axis and
+    confounded the interpretation of any non-monotonicity in the
+    acceptance curve.
+
+    .. note::
+
+       **Audit fixes** (``audit/noise_sweep.md``):
+
+       - **MAJOR-1:** the :math:`\eta` range now extends to
+         :math:`\{0.42, 0.44, 0.46, 0.48\}` so the sweep crosses the
+         theoretical breakdown :math:`\eta_{\max} \approx 0.4470`
+         (set by :math:`(1 - 2\eta)^2 = \varepsilon^2/8`).  Previously
+         the sweep stopped at :math:`\eta = 0.40`, never entering the
+         failure regime.
+       - **MAJOR-2** (not fixed in this revision): the headline
+         acceptance dip in :math:`\eta \in [0.05, 0.30]` is dominated
+         by squared-estimator variance against the slack
+         :math:`\varepsilon^2/8 = 0.01125`, not Lemma 6 attenuation.
+         For a sharper acceptance figure ``classical_samples_verifier``
+         could be bumped to :math:`\sim 30000`; the cleanest empirical
+         confirmation of Lemma 6 is already
+         ``fourier_weight_attenuation.png``.
+       - **MAJOR-3:** :math:`\vartheta` is now held fixed across the
+         sweep (see above).
+       - The hard-coded ``qfs_shots=2000``,
+         ``classical_samples_prover=1000``,
+         ``classical_samples_verifier=3000`` are still below the
+         analytic Hoeffding budget; these are documented limitations
+         tracked in ``audit/FOLLOW_UPS.md``.
+
+       The on-disk ``results/noise_sweep_*.pb`` was generated under
+       the old configuration and is invalid until re-run.
 
     Parameters
     ----------
@@ -76,7 +109,13 @@ def run_noise_sweep_experiment(
     ExperimentResult
     """
     if noise_rates is None:
-        noise_rates = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]
+        # Audit fix MAJOR-1 (audit/noise_sweep.md): extended past
+        # eta_max = (1 - eps/(2*sqrt(2)))/2 ~= 0.4470 for eps=0.3 so the
+        # sweep crosses the theoretical breakdown.
+        noise_rates = [
+            0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4,
+            0.42, 0.44, 0.46, 0.48,
+        ]
 
     print(
         f"=== Noise Sweep: n in {list(n_range)}, eta in {noise_rates}, "
@@ -89,7 +128,11 @@ def run_noise_sweep_experiment(
         for eta in noise_rates:
             effective_coeff = 1.0 - 2.0 * eta
             a_sq = effective_coeff**2
-            theta = min(epsilon, effective_coeff * 0.9) if effective_coeff > 0.01 else 0.01
+            # Audit fix MAJOR-3 (audit/noise_sweep.md): hold theta fixed
+            # at epsilon across the entire eta sweep.  Previously theta
+            # was adapted as ``min(epsilon, 0.9*(1-2*eta))``, which
+            # silently varied a second parameter along the eta axis.
+            theta = epsilon
 
             for _ in range(num_trials):
                 seed = int(rng.integers(0, 2**31))

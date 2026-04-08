@@ -14,7 +14,15 @@ def run_soundness_multi_experiment(
     k_range: list[int] | None = None,
     num_trials: int = 50,
     epsilon: float = 0.3,
-    classical_samples_verifier: int = 3000,
+    # Audit fix M1 (audit/soundness_multi.md): bumped from 3000 -> 30000
+    # to bring the verifier closer to the Hoeffding-derived budget for
+    # the k-sparse path.  ``classical_samples_verifier=3000`` previously
+    # produced ~18% false-acceptance for ``subset_plus_noise`` at k=2,
+    # exceeding the stated delta=0.1.  Existing tests override this
+    # default explicitly, so they remain unaffected.  The on-disk
+    # results/soundness_multi_4_16_100.pb was generated with the old
+    # value and is tracked in audit/FOLLOW_UPS.md as needing a rerun.
+    classical_samples_verifier: int = 30000,
     base_seed: int = 42,
     max_workers: int = 1,
     shard_index: int | None = None,
@@ -35,23 +43,50 @@ def run_soundness_multi_experiment(
     ----------
     ``"partial_real"``
         Prover includes the weaker half of real heavy coefficients
-        plus fake indices.  Tests whether partial real weight passes
-        the threshold.
+        plus a few fake indices.  Tests whether partial real weight
+        passes the threshold.
 
     ``"diluted_list"``
-        Prover includes all real heavy coefficients but pads with
-        20 random indices.  Tests list-size rejection.
+        Prover includes the *weakest* :math:`\max(1, k/2)` real
+        heavy coefficients (audit fix m4 in
+        ``audit/soundness_multi.md``: previously ``max(1, k/4)``,
+        which was always 1 for :math:`k \le 4`) plus up to 20 random
+        padding indices.  Simulates an adversary that only knows
+        part of the true signal and tries to dilute it with noise.
 
     ``"shifted_coefficients"``
         Prover sends entirely wrong indices with fabricated large
         coefficient claims.  Tests that independent estimation
-        exposes zero true weight.
+        exposes zero true weight.  *Note (m2 in the audit): this
+        strategy is structurally trivial -- accumulated true weight
+        is identically 0 -- and largely overlaps with the simpler
+        ``wrong_parity`` in :func:`run_soundness_experiment`.  It
+        is retained for back-compat with the existing test suite.*
 
     ``"subset_plus_noise"``
         Prover includes only the single heaviest real coefficient
         plus several near-threshold fake indices.  Tests the
         marginal case where one real coefficient's weight alone
         is insufficient.
+
+    .. note::
+
+       **Sample budget bumped from 3000 -> 30000 (audit fix M1).**
+       The previous default ``classical_samples_verifier=3000`` was
+       three to four orders of magnitude below the Hoeffding-derived
+       budget required for the k-sparse path's tolerance
+       :math:`\varepsilon^2/(256 k^2 |L|)`.  At :math:`k = 2` the
+       ``subset_plus_noise`` strategy was falsely accepting at up
+       to 18 %, exceeding the stated :math:`\delta = 0.1`.  Bumping
+       to 30 000 brings the verifier closer to the analytic budget;
+       the existing
+       ``results/soundness_multi_4_16_100.pb`` was generated with
+       the old value and is invalid until re-run.  See
+       ``audit/soundness_multi.md`` and ``audit/FOLLOW_UPS.md``.
+
+       :math:`\vartheta = \min(\varepsilon,\, 0.9/k)` is an
+       undocumented heuristic (m1 in the audit); the paper requires
+       :math:`\vartheta \in (2^{-(n/2 - 3)},\, 1)`.
 
     Parameters
     ----------

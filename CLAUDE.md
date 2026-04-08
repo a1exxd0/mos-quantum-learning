@@ -64,3 +64,36 @@ uv run python -m experiments.decode results/*.pb
 uv run sphinx-build docs docs/_build/html
 open docs/_build/html/index.html
 ```
+
+# Audit and follow-up reruns
+
+A full per-experiment audit of all 11 experiments against
+`papers/classical_verification_of_quantum_learning.pdf` lives in
+`audit/`. The cross-experiment synthesis is `audit/SUMMARY.md`; each
+individual audit file lists MAJOR/MINOR/NIT findings keyed back to
+specific lines of code.
+
+The protocol code under `ql/` and `mos/` is **correct** and should not
+be modified — every Theorem 12 / Theorem 15 invariant has been
+audited line-by-line. The audit findings are about experimental
+**framing**, hard-coded sample budgets bypassing analytic formulas,
+and a few specific harness bugs (now fixed). Tier 1 / Tier 2 fixes
+have been applied; **Tier 3 / Tier 4 reruns** that need to happen on
+the DCS cluster are tracked in `audit/FOLLOW_UPS.md`.
+
+When working on an experiment, **always read its audit file**
+(`audit/<experiment>.md`) before changing the harness, plot script,
+or interpretation — the audit explains what was already known to be
+wrong with the previous version and why it was fixed the way it was.
+
+The most important applied fixes:
+
+| Experiment | Fix | Existing `.pb` valid? |
+|---|---|---|
+| `average_case` | `TrialSpec.k` is now plumbed for `k_sparse_*` and `sparse_plus_noise`; `random_boolean` dropped | NO — needs rerun |
+| `soundness_multi` | `classical_samples_verifier` default 3000 → 30000; `_strategy_diluted_list` formula fixed | NO — needs rerun |
+| `noise_sweep` | η range extended to cross theoretical breakdown; θ held fixed | NO — needs rerun |
+| `scaling`, `theta_sensitivity`, `truncation`, `k_sparse`, `bent`, `ab_regime`, `gate_noise`, `soundness` | docstring + plot caption / interpretation fixes only | yes |
+
+The follow-up reruns are listed in `audit/FOLLOW_UPS.md` with
+exact submission commands.

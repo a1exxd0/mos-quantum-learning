@@ -30,6 +30,14 @@ if [ "$EXPERIMENT" = "soundness" ] && [ "$TRIALS" -lt 50 ]; then
     PATTERN="${EXPERIMENT}_${N_MIN}_${N_MAX}_50"
 fi
 
+# The 'noise' subcommand writes its output as 'noise_sweep_*'; every other
+# experiment uses the CLI subcommand name as the file basename. Without
+# this special case, the merge job would glob 'noise_4_16_100_shard*.pb'
+# (no match) and silently produce no output.
+if [ "$EXPERIMENT" = "noise" ]; then
+    PATTERN="noise_sweep_${N_MIN}_${N_MAX}_${TRIALS}"
+fi
+
 # SLURM opens --output/--error files before the script body runs,
 # so these directories must exist at submission time.
 mkdir -p slurm_logs results

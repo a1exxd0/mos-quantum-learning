@@ -234,6 +234,17 @@ def plot_list_size_growth(agg: dict[int, dict], ns: list[int]) -> None:
         color="red", alpha=0.8,
     )
 
+    # Audit fix m2 (audit/bent.md): shade the Corollary 5 uncertain
+    # band [theta/2, theta) where inclusion in L is permitted but not
+    # required.  At n=4 the bent coefficients sit at 2^(-n/2) = 0.25,
+    # which lies in [0.15, 0.30) for the default theta = 0.3 -- so
+    # the n=4 acceptance is NOT "below the crossover" but rather
+    # Corollary 5 extracting from the uncertain band.
+    n_band_lo = 2 * math.log2(1.0 / THETA)        # 2^(-n/2) = theta
+    n_band_hi = 2 * math.log2(2.0 / THETA)        # 2^(-n/2) = theta/2
+    ax.axvspan(n_band_lo, n_band_hi, color="orange", alpha=0.10,
+               label=rf"Cor. 5 uncertain band $[\theta/2, \theta)$")
+
     # Mark zero-valued points
     for n_val, med in zip(ns, medians):
         if med == 0:

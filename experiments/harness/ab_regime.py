@@ -40,6 +40,38 @@ def run_ab_regime_experiment(
     experiments; positive gaps exercise Definition 14 of [ITCS2024]_
     where the verifier is told that :math:`a < b`.
 
+    .. note::
+
+       **Theorem 12 completeness precondition is satisfied only at
+       gap = 0.** Theorem 12 requires
+       :math:`\varepsilon \ge 2\sqrt{b^2 - a^2}`; with
+       :math:`\varepsilon = 0.3` this means
+       :math:`\mathrm{gap} \le (\varepsilon/2)^2 = 0.0225`, i.e. only
+       the ``gap = 0`` cell of the default sweep formally satisfies
+       the precondition.  For ``gap`` :math:`> 0.0225` the experiment
+       is intentionally running outside Theorem 12's completeness
+       guarantee on a benign ``sparse_plus_noise`` :math:`\varphi`
+       whose true Parseval mass :math:`\|\tilde\varphi\|_2^2 = 0.52`
+       sits at the centre of :math:`[a^2, b^2]`, so honest
+       interactions still produce
+       :math:`\sum \widehat\xi^2 \ge a^2 - \varepsilon^2/8`.
+
+       This is **not** evidence that Theorem 13 (a worst-case
+       sample-complexity lower bound for distinguishing random
+       parities from :math:`U_{n+1}`) is loose; Theorem 13 does not
+       upper-bound the acceptance probability of any specific
+       honest run on benign inputs.  The previous figure-script
+       interpretation was corrected per
+       ``audit/ab_regime.md`` (M1).
+
+       The "ab regime" sweep is structurally a **1-D**
+       :math:`a^2`-sweep: :math:`b^2 \le 0.72` and the list-size cap
+       :math:`64 b^2/\vartheta^2 \le 512` never binds the maximum
+       honest list of 4 (M2 in the audit).  To probe both
+       completeness and soundness of Definition 14, the centre
+       :math:`pw` would need to vary independently --- see
+       ``audit/FOLLOW_UPS.md``.
+
     Parameters
     ----------
     n_range : range
@@ -89,7 +121,13 @@ def run_ab_regime_experiment(
 
                 a_sq = max(parseval_weight - gap / 2.0, 0.01)
                 b_sq = min(parseval_weight + gap / 2.0, 1.0)
-                # Dominant coefficient is 0.7, so keep theta below it
+                # In the verifier path theta only enters via the list
+                # bound 64 b^2/theta^2 (which doesn't bind at |L| <= 4),
+                # so any theta <= epsilon works here.  Audit fix m4
+                # (audit/ab_regime.md): the previous comment about
+                # "keep theta below the dominant coefficient" was a
+                # prover-side heuristic, irrelevant in the verifier
+                # path tested by this experiment.
                 theta = min(epsilon, 0.6)
 
                 specs.append(

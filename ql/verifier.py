@@ -22,10 +22,16 @@ distributional agnostic quantum parity and Fourier-sparse learning.
 
        \sum_{s \in L} \hat{\xi}(s)^2 \geq \tau_{\text{accept}}
 
-   where :math:`\tau_{\text{accept}}` depends on the distribution class
-   promise (Definition 14).  For the functional case (:math:`a = b = 1`),
-   the threshold is :math:`1 - \varepsilon^2/8`.  For the distributional
-   case, it is :math:`a^2 - \varepsilon^2/8`.
+   where :math:`\tau_{\text{accept}}` depends on the L\ :sup:`2`-bracket
+   promise (**Definition 14**, :math:`\mathbb{E}[\phi^2] \in [a^2, b^2]`).
+   The protocol *also* assumes the granularity promise (**Definition 11**
+   in the functional case, **Definition 13** in the distributional case:
+   :math:`\hat\phi(s) \neq 0 \Rightarrow |\hat\phi(s)| \geq \vartheta`),
+   which is a *separate* constraint from Definition 14 — Def 14 brackets
+   total Fourier mass while Def 11/13 forbids small-but-nonzero
+   coefficients.  For the functional case (:math:`a = b = 1`), the
+   acceptance threshold is :math:`1 - \varepsilon^2/8`; for the
+   distributional case it is :math:`a^2 - \varepsilon^2/8`.
 
 5. **Output hypothesis**:
 

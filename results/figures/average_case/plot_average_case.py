@@ -48,21 +48,27 @@ def wilson_ci(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
     return (max(0.0, centre - half), min(1.0, centre + half))
 
 
+# Audit fix M2 (audit/average_case.md): ``random_boolean`` was
+# dropped from the harness because uniform random truth tables at
+# n >= 6 violate Definition 11 by construction (every Fourier
+# coefficient has magnitude ~ 2^{-n/2} < theta), so the verifier
+# *correctly* rejects them.  Including it as one of four "average
+# case" families conflated promise-class violation with average-case
+# behaviour.  Old .pb files containing the family will simply have
+# no rows for it after the rerun tracked in audit/FOLLOW_UPS.md.
 FAMILY_LABELS = {
     "k_sparse_2": "$k$-sparse ($k{=}2$)",
     "k_sparse_4": "$k$-sparse ($k{=}4$)",
-    "random_boolean": "Random Boolean",
     "sparse_plus_noise": "Sparse + noise",
 }
 
 FAMILY_LABELS_PLAIN = {
     "k_sparse_2": "k-sparse (k=2)",
     "k_sparse_4": "k-sparse (k=4)",
-    "random_boolean": "Random Boolean",
     "sparse_plus_noise": "Sparse + noise",
 }
 
-FAMILY_ORDER = ["k_sparse_2", "k_sparse_4", "sparse_plus_noise", "random_boolean"]
+FAMILY_ORDER = ["k_sparse_2", "k_sparse_4", "sparse_plus_noise"]
 
 
 def parse_family(phi_desc: str) -> str:

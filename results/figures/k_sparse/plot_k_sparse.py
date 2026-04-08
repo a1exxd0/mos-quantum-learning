@@ -84,6 +84,12 @@ def build_tables(trials: list[dict]) -> dict:
         copies = [t["totalCopies"] for t in ts]
         weights = [t["accumulatedWeight"] for t in ts]
         thresholds = [t["acceptanceThreshold"] for t in ts]
+        # Audit fix m3 (audit/k_sparse.md): expose b_sq so the
+        # list-size bound overlay can use the actually-enforced
+        # 64*b^2/theta^2 (Theorem 10/15) instead of 4/theta^2
+        # (Theorem 7).  Dirichlet draws give per-trial b_sq, take
+        # the mean across trials in this cell.
+        b_sq_vals = [t.get("bSq", 1.0) for t in ts]
 
         # Misclassification: use misclassificationRate if available,
         # otherwise use 1 - correctness as proxy
@@ -122,6 +128,7 @@ def build_tables(trials: list[dict]) -> dict:
             "rej_list": rej_list,
             "rej_weight": rej_weight,
             "theta": ts[0]["theta"],
+            "mean_b_sq": float(np.mean(b_sq_vals)),
         }
 
     return {"summaries": summaries, "ks": ks, "ns": ns}
@@ -202,14 +209,24 @@ def plot_acceptance_vs_n(summaries: dict, ks: list[int], ns: list[int]) -> None:
         ls="--",
         color="grey",
         alpha=0.6,
-        label=r"$1-\delta=0.9$ (Thm 15)",
+        label=r"$1-\delta=0.9$ (nominal Thm 10/15 target)",
     )
     ax.set_xlabel("$n$ (number of qubits)")
     ax.set_ylabel("Acceptance rate")
     ax.set_ylim(-0.02, 1.08)
     ax.set_xticks(ns)
     ax.legend(fontsize=8, loc="lower left")
-    ax.set_title("$k$-Sparse completeness: acceptance rate vs $n$")
+    # Audit fix M1 (audit/k_sparse.md): the experiment intentionally
+    # operates outside the Definition 11 promise -- Dirichlet(1,...,1)
+    # routinely produces coefficients below theta -- so the
+    # 1-delta=0.9 target is not enforced for all cells.  This
+    # acceptance ceiling is a structural consequence of being
+    # off-promise, not a protocol failure.
+    ax.set_title(
+        "$k$-Sparse completeness: acceptance rate vs $n$\n"
+        "(off-promise: Dirichlet$(1,\\dots,1)$ targets often have "
+        "$c_{\\min} < \\theta$)"
+    )
     fig.tight_layout()
     save(fig, "acceptance_vs_n_by_k")
 
@@ -246,17 +263,26 @@ def plot_list_size_vs_k(summaries: dict, ks: list[int], ns: list[int]) -> None:
             linewidth=0.5,
         )
 
-    # Overlay theoretical bound 4/theta^2 per k
+    # Overlay actually-enforced bound 64*b_sq/theta^2 per k.
+    # Audit fix m3 (audit/k_sparse.md): the previous version overlaid
+    # 4/theta^2 (from Theorem 7, the SQ verifier) but the experiment
+    # actually runs the random-example verifier from Theorem 10/15
+    # which uses 64*b^2/theta^2.  ``b_sq`` is read from the trial
+    # summaries; for the experiment's Dirichlet targets, b_sq varies
+    # per trial so we take the mean over the displayed cells.
     for j, k in enumerate(ks):
-        # theta varies with k; take the theta from any trial with that k
         theta = None
+        b_sq_vals: list[float] = []
         for n in ns:
             s = summaries.get((k, n))
             if s:
-                theta = s["theta"]
-                break
+                if theta is None:
+                    theta = s["theta"]
+                if "mean_b_sq" in s:
+                    b_sq_vals.append(s["mean_b_sq"])
         if theta:
-            bound = 4 / (theta**2)
+            mean_b_sq = float(np.mean(b_sq_vals)) if b_sq_vals else 1.0
+            bound = 64.0 * mean_b_sq / (theta**2)
             ax.plot(
                 [j - 0.45, j + 0.45],
                 [bound, bound],
@@ -273,7 +299,7 @@ def plot_list_size_vs_k(summaries: dict, ks: list[int], ns: list[int]) -> None:
                     color="red",
                     linewidth=1.5,
                     linestyle="--",
-                    label=r"$4/\theta^2$ (Parseval bound)",
+                    label=r"$64\,b^2/\theta^2$ (Thm 10/15 list bound)",
                 )
 
     ax.set_xticks(x)

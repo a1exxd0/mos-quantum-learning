@@ -167,13 +167,24 @@ def plot_acceptance_vs_gap(
         )
         ax.fill_between(gaps, ci_lo, ci_hi, alpha=0.15, color=colours[i])
 
-    # Theoretical reference: epsilon >= 2*sqrt(b^2 - a^2) from Thm 13
-    # With epsilon = 0.3, the bound requires gap <= (epsilon/2)^2 = 0.0225
+    # Theorem 12 completeness precondition: epsilon >= 2*sqrt(b^2-a^2).
+    # With epsilon = 0.3, this requires gap <= (epsilon/2)^2 = 0.0225,
+    # i.e. only the gap=0 cell formally satisfies the precondition.
+    # Audit fix M1 (audit/ab_regime.md): the previous label called this
+    # the "Thm 13 bound", which conflated a worst-case sample-complexity
+    # lower bound (Thm 13) with the contrapositive of Thm 12's
+    # completeness precondition.  Thm 13 does not upper-bound acceptance
+    # probability of any specific honest run.
     eps = 0.3
     critical_gap = (eps / 2) ** 2
     ax.axvline(
         critical_gap, ls=":", color="red", alpha=0.7,
-        label=f"Thm 13 bound: gap $= (\\varepsilon/2)^2 = {critical_gap:.4f}$",
+        label=f"Thm 12 completeness boundary: gap $= (\\varepsilon/2)^2 = {critical_gap:.4f}$",
+    )
+    ax.axvspan(
+        critical_gap, gaps[-1] + (gaps[-1] - gaps[-2]) * 0.5,
+        color="red", alpha=0.05,
+        label="Outside Thm 12 completeness regime",
     )
 
     ax.axhline(0.9, ls="--", color="grey", alpha=0.6, label=r"$1-\delta=0.9$")
@@ -469,13 +480,46 @@ def main() -> None:
     print("   as the promise weakens (gap widens), the verifier lowers the bar.")
     print()
 
-    # Tightness of Thm 13 bound
-    print(f"2. Thm 13 tightness (eps >= 2*sqrt(gap)):")
-    print(f"   Critical gap = {critical_gap:.4f} is far below all tested gaps")
-    print(f"   (min tested gap = {gaps[0]}). Yet the protocol succeeds at all")
-    print(f"   tested gaps, indicating the threshold formula (Thm 12) remains")
-    print(f"   effective even when the Thm 13 bound on eps is violated.")
-    print(f"   The bound may be loose for the specific functions tested.")
+    # Audit fix M1 (audit/ab_regime.md): the previous text wrongly
+    # framed acceptance for gap > 0.0225 as evidence that Theorem 13
+    # is loose.  Theorem 13 is a worst-case sample-complexity lower
+    # bound for distinguishing random parities from U_{n+1}; it does
+    # NOT upper-bound the acceptance probability of any specific
+    # honest run on benign inputs.  The actual story is that the
+    # experiment is running outside Theorem 12's completeness regime
+    # for 5 of 6 gaps; honest interactions still pass on this benign
+    # sparse_plus_noise phi because ||phi_tilde||_2^2 = 0.52 sits at
+    # the centre of [a^2, b^2] by construction.
+    print(
+        f"2. Outside Theorem 12 completeness regime (5 of 6 gaps):"
+    )
+    print(
+        f"   The Thm 12 precondition eps >= 2*sqrt(b^2-a^2) requires"
+    )
+    print(
+        f"   gap <= (eps/2)^2 = {critical_gap:.4f}.  Only gap=0 satisfies it."
+    )
+    print(
+        f"   For gap > {critical_gap:.4f} the experiment runs *outside* the"
+    )
+    print(
+        f"   theorem's completeness guarantee, but honest interactions on this"
+    )
+    print(
+        f"   benign sparse_plus_noise phi still produce sum xi^2 >= a^2 - eps^2/8"
+    )
+    print(
+        f"   because ||phi_tilde||_2^2 = 0.52 sits at the centre of [a^2, b^2] by"
+    )
+    print(
+        f"   construction.  This is NOT evidence that Theorem 13 (a worst-case"
+    )
+    print(
+        f"   sample-complexity lower bound) is loose -- Thm 13 does not upper-"
+    )
+    print(
+        f"   bound the acceptance probability of any specific honest run."
+    )
     print()
 
     # Weight check as binding constraint

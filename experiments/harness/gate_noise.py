@@ -48,6 +48,42 @@ def run_gate_noise_experiment(
     :math:`a^2 = b^2 = 1` (noiseless distribution class promise, since
     the noise is purely at the gate level rather than the label level).
 
+    .. warning::
+
+       **Exploratory — the paper makes no predictions about gate
+       noise.** Caro et al. only analyse classical label-flip noise
+       on the data oracle (Definition 5(iii) / Definition 12).  This
+       experiment is **NOT** a validation of any theorem.
+
+       Three substantive caveats from ``audit/gate_noise.md``:
+
+       1. The observed "threshold" at small :math:`n` is dominated by
+          **truth-table oracle synthesis cost** in
+          :func:`mos.MoSState._circuit_oracle_f`, which emits up to
+          :math:`2^n` multi-controlled-X gates per shot.  Each MCX
+          decomposes into :math:`O(n)` CX gates after transpilation,
+          giving expected errors per shot :math:`\sim p \cdot n \cdot 2^n`
+          --- exponential in :math:`n`.  The paper's Theorem 12 only
+          requires :math:`O(n \log(\dots))` *single-qubit* prover gates,
+          so the experiment is hitting a synthesis blow-up that does
+          not exist in the theory.
+       2. The high-:math:`p` end of the sweep (:math:`p \in \{0.2, 0.5\}`)
+          is unphysical: real superconducting/trapped-ion 2q gate
+          error rates are :math:`\sim 10^{-4}` to :math:`10^{-2}`.
+          At :math:`p = 0.5` the depolarising channel maps any state
+          to within :math:`1/4` of the maximally mixed state in one
+          application.
+       3. The noise model is attached only to ``h``, ``x``, ``cx``.
+          Other transpiled basis gates (``sx``, ``rz``, ``u3``,
+          ``t``, ``tdg``) carry **no error**, so the effective
+          per-logical-op error is smaller than nominal :math:`p`.
+
+       The headline finding "the verifier fails sharply under gate
+       noise" is **NOT supported** without isolating circuit-
+       implementation cost from protocol robustness.  See
+       ``audit/FOLLOW_UPS.md`` for the proposed structured-oracle
+       fix that would actually probe the protocol.
+
     Parameters
     ----------
     n_range : range

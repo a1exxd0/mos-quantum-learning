@@ -8,13 +8,17 @@ from numpy.random import default_rng
 
 from experiments.harness.phi import (
     make_k_sparse,
-    make_random_boolean,
     make_sparse_plus_noise,
 )
 from experiments.harness.results import ExperimentResult
 from experiments.harness.worker import TrialSpec, run_trials_parallel
 
-_DEFAULT_FAMILIES = ["k_sparse_2", "k_sparse_4", "random_boolean", "sparse_plus_noise"]
+# ``random_boolean`` was removed after audit/average_case.md M2: a uniform
+# random truth table at :math:`n \ge 6` violates Definition 11 by
+# construction (every Fourier coefficient has magnitude
+# :math:`\sim 2^{-n/2} < \vartheta`), so the verifier *correctly* rejects
+# it.  Including it as an "average case" representative was misleading.
+_DEFAULT_FAMILIES = ["k_sparse_2", "k_sparse_4", "sparse_plus_noise"]
 
 
 def _generate_trial(
@@ -36,6 +40,10 @@ def _generate_trial(
     seed = int(rng.integers(0, 2**31))
     trial_rng = default_rng(seed)
 
+    # ``k`` is now plumbed into ``TrialSpec`` so the worker dispatches
+    # k-sparse families to ``verify_fourier_sparse`` (Theorems 9/10/15)
+    # rather than ``verify_parity`` (Theorem 12).  See
+    # ``audit/average_case.md`` (M1).
     if family.startswith("k_sparse_"):
         k = int(family.split("_")[-1])
         phi, target_s, pw = make_k_sparse(n, k, trial_rng)
@@ -46,15 +54,15 @@ def _generate_trial(
         # heaviest coefficient so GL can detect it.
         theta = min(epsilon, max(0.01, max_coeff * 0.9))
         a_sq = b_sq = pw
-    elif family == "random_boolean":
-        phi, target_s = make_random_boolean(n, trial_rng)
-        theta = epsilon
-        a_sq = b_sq = 1.0
-        pw = 1.0
+        spec_k = k
     elif family == "sparse_plus_noise":
         phi, target_s, pw = make_sparse_plus_noise(n, trial_rng)
         theta = epsilon  # dominant coeff 0.7 >> epsilon
         a_sq = b_sq = pw
+        # 1 dominant + 3 secondary = 4 heavy coefficients (see
+        # ``phi.make_sparse_plus_noise``).  Routes to
+        # ``verify_fourier_sparse`` with k=4.
+        spec_k = 4
     else:
         raise ValueError(f"Unknown function family: {family}")
 
@@ -73,6 +81,7 @@ def _generate_trial(
         classical_samples_verifier=classical_samples_verifier,
         seed=seed,
         phi_description=f"{family}_n={n}",
+        k=spec_k,
     )
 
 
@@ -98,23 +107,46 @@ def run_average_case_experiment(
     and hypothesis quality.
 
     The experiment goes beyond the single-parity regime of Exp 1 by
-    testing three additional function families:
+    testing three Fourier-sparse function families:
 
     ``k_sparse_2``, ``k_sparse_4``
         :math:`k`-Fourier-sparse functions with random Dirichlet
         coefficients on the :math:`k`-simplex (Corollary 7).
         :math:`\vartheta` is adapted per *k* so the Goldreich--Levin
         threshold remains below the expected heaviest coefficient.
-
-    ``random_boolean``
-        Uniform random truth tables -- maximally Fourier-dense, the
-        hardest case.  :math:`a^2 = b^2 = 1` (functional).
+        Each trial sets ``TrialSpec.k = k`` so the worker dispatches
+        to :meth:`~ql.verifier.MoSVerifier.verify_fourier_sparse`
+        (Theorems 9/10/15) with the k-sparse acceptance threshold
+        :math:`a^2 - \varepsilon^2/(128 k^2)`.
 
     ``sparse_plus_noise``
         One dominant parity (:math:`c_{\mathrm{dom}} = 0.7`) plus
         three secondary coefficients (:math:`c_{\mathrm{sec}} = 0.1`
-        each).  Tests whether the protocol correctly identifies the
-        dominant coefficient in the presence of structured Fourier noise.
+        each), giving 4 heavy coefficients in total.  Sets
+        ``TrialSpec.k = 4`` so the verifier runs the Fourier-sparse
+        path matching the actual sparsity of the target.
+
+    .. note::
+
+       **History.** Prior to the audit fix in
+       ``audit/average_case.md`` (M1), all three families dispatched
+       to ``verify_parity`` because ``TrialSpec.k`` was never set.
+       The audit identified this as the highest-value single fix; as
+       a result the previous on-disk
+       ``results/average_case_4_16_100.pb`` was generated against the
+       wrong verifier path and is invalid until re-generated.  See
+       ``audit/FOLLOW_UPS.md``.
+
+       The fourth family ``random_boolean`` (uniform truth tables)
+       was dropped: at :math:`n \ge 6` it violates Definition 11 by
+       construction, so the verifier *correctly* rejects it (M2 in
+       the audit).  Including it as an "average case" representative
+       conflated promise-class violation with average-case behaviour.
+
+       :math:`\vartheta = \min(\varepsilon,\, 0.9/k)` is a heuristic
+       (m4 in the audit), not derived from a theorem; for Dirichlet
+       draws a non-trivial fraction of trials will still have
+       :math:`c_{\min} < \vartheta`.
 
     Parameters
     ----------

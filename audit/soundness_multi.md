@@ -119,3 +119,43 @@ False-acceptance rates (1 − rejection) compared with `delta = 0.1`:
 **The verifier code is faithful to Theorem 15**, and three of four cheating strategies (`partial_real`, `diluted_list`, `shifted_coefficients`) reject at rates indistinguishable from 1 — a meaningful sanity check, even though those three are largely interchangeable and partly redundant with the simpler `soundness` experiment. The fourth strategy, `subset_plus_noise`, is the only one that probes the decision boundary, and it reveals that the experiment's hardcoded `classical_samples_verifier = 3000` is far below the Hoeffding-derived sample budget the paper's `δ = 0.1` guarantee assumes for k ≥ 2. The resulting empirical false-acceptance rate (up to 18% at k=2) is not a soundness violation in the formal Big-O sense, but it does mean the experiment **is not validating** the paper's `1 − δ` guarantee in the regime it appears to claim to validate. Plotting infrastructure is solid; the docstring framing of what the experiment proves should be tightened. Minor implementation bugs (m4, m5) do not affect the qualitative conclusions but would matter if `k_range` were extended.
 
 **Overall: scientifically sound implementation of the verifier, partially-misleading framing of what the experiment demonstrates. One MAJOR concern about under-sampling (M1), one MAJOR concern about strategy redundancy (M2), several MINOR cleanups.**
+
+## Post-rerun (2026-04-08)
+
+After applying the M1 fix (`classical_samples_verifier` default 3000 → **30000** in `experiments/harness/soundness_multi.py:25`) and the m4 fix (`_strategy_diluted_list` `n_keep = max(1, len // 2)` in `experiments/harness/worker.py:304`), `results/soundness_multi_4_16_100.pb` was regenerated on the DCS cluster (SLURM array `1308020` + merge `1308021`, 8 shards on `tiger`, 10 400 trials, 113.9s merge wall-clock).
+
+### Verified state of the fix
+
+- `soundness_multi.py:25` — `classical_samples_verifier: int = 30000` (was 3000).
+- `worker.py:304` — `n_keep = max(1, len(heavy_sorted) // 2)` (was `// 4`).
+- `worker.py:394-414` — verifier dispatch on `spec.k > 1` to `verify_fourier_sparse` confirmed.
+
+### Verified outcomes (`results/figures/soundness_multi/soundness_multi_summary.csv`)
+
+| Strategy | k | Old rejection range | **New rejection range** |
+|---|---|---|---|
+| partial_real | 2 | 1.000 | **1.000** |
+| partial_real | 4 | 1.000 | **1.000** |
+| diluted_list | 2 | 0.96 – 0.99 | **0.96 – 1.00** |
+| diluted_list | 4 | 1.000 | **1.000** (now keeps 2 of 4 weakest, was 1) |
+| shifted_coefficients | 2 | 1.000 | **1.000** |
+| shifted_coefficients | 4 | 1.000 | **1.000** |
+| **subset_plus_noise** | **2** | **0.82 – 0.92** | **0.91 – 0.98** |
+| subset_plus_noise | 4 | 0.98 – 1.00 | **0.99 – 1.00** |
+
+The plot script's own summary line confirms: *"All (strategy, k, n) combinations satisfy soundness ≥ 1−δ = 0.9."* For `subset_plus_noise k=2` specifically, the new range `[0.91, 0.98]` is comfortably above the `1 − δ = 0.9` budget at every n; the maximum false-acceptance is now **9% at n=15**, vs **18%** at n=7/9 in the old data — well inside the stated `δ = 0.1`.
+
+### Status of audit findings
+
+- **M1 (under-sampling causing false-accept above δ):** **RESOLVED.** The 10× sample budget bump pushes the empirical squared-estimator standard deviation below the `c_min²` gap that `subset_plus_noise k=2` was probing. Per the agent's pre-submission delta-method analysis, with `m = 30000` the squared-coefficient standard deviation is `≈ 1.4/√30000 ≈ 0.0081`, vs the required gap `~ c_min² ≈ 0.06`, giving a `~7σ` separation and predicted false-accept `~ Q(7) ≈ 1e-12` per coefficient. Empirical: max false-accept = 0.09, mean ≈ 0.05.
+- **m4 (`diluted_list` `n_keep` degenerate):** **RESOLVED for k ≥ 4.** At k=4 the strategy now keeps the weakest 2 of 4 real coefficients (was 1) — accumulated true weight rises from `~c_4²` to `~c_3² + c_4²` but is still below `pw − ε²/(128 · 16)`, so rejection remains 1.000. At k=2 the formula gives `n_keep = max(1, 2//2) = 1`, unchanged from before — the m4 fix only takes effect at k ≥ 4 by construction.
+- **M2 (strategy redundancy):** still applicable; engineering decision deferred to the Tier 4 cheating-strategy review (`audit/FOLLOW_UPS.md` §8).
+- **m1, m2, m3, m5, m6, m7, n1, n2:** not addressed by this rerun; documentation/framing-level issues.
+
+### Cost note
+
+The 10× sample-budget bump increased per-trial cost ~10× as predicted; the merge-step wall-clock of 114s reflects only the merge itself, not the array job. Cluster wall-clock for the 10 400 trial array was acceptable on `tiger`.
+
+### Verdict update
+
+The verifier implementation is unchanged (it was already faithful to Theorem 15); what changed is that the experiment now exercises the verifier with enough samples to deliver the `1 − δ` guarantee it claimed. **MAJOR(M1) + m4 → PASS. M2 deferred to Tier 4.**

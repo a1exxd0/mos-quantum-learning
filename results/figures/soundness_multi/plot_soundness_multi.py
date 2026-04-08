@@ -64,8 +64,15 @@ SINGLE_STRATEGY_LABELS = {
     "inflated_list": "Inflated list",
 }
 
-# k inference: in the experiment code, theta = min(epsilon, max(0.01, (1/k)*0.9))
-# For epsilon=0.3:  k=2 -> theta=0.3,  k=4 -> theta=0.225
+# Audit fix m2 (audit/soundness_multi.md): the ``k`` field IS
+# populated on the protobuf (see ``experiments/harness/results.py``
+# lines 374-375 where ``pb.k = int(t.k)`` is set whenever
+# ``t.k is not None``).  We now read it directly via the JSON
+# camelCase key ``"k"`` instead of inferring from theta, which was
+# fragile and broke after the audit fix that holds theta fixed.
+# THETA_TO_K is retained as a fallback for legacy ``.pb`` files
+# generated before the audit fix where the ``k`` field may be
+# missing or zero.
 THETA_TO_K = {0.3: 2, 0.225: 4}
 
 
@@ -84,11 +91,23 @@ def load_single_data() -> dict:
 
 
 def infer_k(trial: dict) -> int:
-    """Infer k from theta value (the k field was not populated in the proto)."""
+    """Read ``k`` directly from the trial dict, with theta fallback.
+
+    The ``k`` field is populated on every multi-element soundness
+    trial (see ``experiments/harness/results.py`` and
+    ``experiments/harness/worker.py``).  Older ``.pb`` files generated
+    before audit fix m2 may have ``k = 0`` (the protobuf default),
+    in which case we fall back to inferring from theta.
+    """
+    k = trial.get("k", 0)
+    if k:
+        return int(k)
     theta = trial["theta"]
     k = THETA_TO_K.get(theta)
     if k is None:
-        raise ValueError(f"Unknown theta={theta}; cannot infer k")
+        raise ValueError(
+            f"Unknown theta={theta} and k field is missing; cannot infer k"
+        )
     return k
 
 

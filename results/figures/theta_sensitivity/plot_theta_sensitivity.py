@@ -178,11 +178,16 @@ def plot_list_size_vs_theta(
     colours = sns.color_palette("colorblind", len(representative_ns) + 1)
     fig, ax = plt.subplots(figsize=(7, 4.5))
 
-    # Theoretical bound
+    # Theoretical bound.  Audit fix m3 (audit/theta_sensitivity.md):
+    # the previous label "Parseval bound" was misleading -- the
+    # 4/theta^2 line is actually Theorem 7's SQ-verifier bound, NOT
+    # the bound this experiment's verifier enforces (Theorem 8/12 uses
+    # 64*b^2/theta^2).  Both are valid upper bounds; the legend now
+    # makes the distinction explicit.
     theta_fine = np.linspace(thetas[0], thetas[-1], 200)
     bound = 4.0 / theta_fine**2
     ax.plot(theta_fine, bound, "k--", lw=1.5, alpha=0.6,
-            label=r"$4/\theta^2$ (Parseval bound)")
+            label=r"$4/\theta^2$ (Thm 7/9 SQ-verifier bound)")
 
     for i, n in enumerate(representative_ns):
         medians = []
