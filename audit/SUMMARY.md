@@ -52,11 +52,11 @@ Most experiments fix `qfs_shots=2000`, `classical_samples_prover=1000`, `classic
 
 ### Theme B — Experiments operate outside the paper's promise classes
 
-Several experiments run on distributions that violate Definition 11 / Definition 14 / the precondition `ε ≥ 2√(b²−a²)` of Theorems 12/15. The verifier *correctly* either rejects or fails to certify these instances; the experiments then interpret this as "average-case failure" or "Theorem 13 looseness", which misframes the result.
+Several experiments run on distributions that violate the θ-granularity promise (**Definition 11** for the functional case, **Definition 13** for the distributional case — these are the `hat phi(s) != 0 => |hat phi(s)| >= theta` constraints at pp.35 and 44 respectively) and/or the precondition `ε ≥ 2√(b²−a²)` of Theorems 12/15 (which comes from **Definition 14**, the L²-bracket `E[phi^2] in [a^2, b^2]` at p.44 — a *separate* promise about total Fourier mass, not granularity). The verifier *correctly* either rejects or fails to certify these instances; the experiments then interpret this as "average-case failure" or "Theorem 13 looseness", which misframes the result.
 
 **Where it matters:**
-- **average_case** (M1, M2): the worst offender. `k_sparse_2`, `k_sparse_4`, `sparse_plus_noise` all set `spec.k = None`, so the worker dispatches to `verify_parity` instead of `verify_fourier_sparse`. Theorems 9/10/15 prescribe the latter, with threshold `a² − ε²/(32 k²)` and Lemma-14 randomized hypothesis. Plus `random_boolean` violates Definition 11 at n≥6 by construction.
-- **k_sparse** (M1): `make_k_sparse` uses Dirichlet(1,..,1) which routinely produces `c_min < θ`, violating Definition 11. Acceptance rate ceiling is structural, not protocol failure.
+- **average_case** (M1, M2): the worst offender. `k_sparse_2`, `k_sparse_4`, `sparse_plus_noise` all set `spec.k = None`, so the worker dispatches to `verify_parity` instead of `verify_fourier_sparse`. Theorems 9/10/15 prescribe the latter, with threshold `a² − ε²/(128 k²)` and Lemma-14 randomized hypothesis. Plus `random_boolean` violates Definition 11 at n≥6 by construction.
+- **k_sparse** (M1): `make_k_sparse` uses Dirichlet(1,..,1) which routinely produces `c_min < θ`, violating Definition 13 (the distributional θ-granularity promise; Definition 11 is its functional analogue). Acceptance rate ceiling is structural, not protocol failure.
 - **ab_regime** (M1): `ε ≥ 2√(b²−a²)` is satisfied only for `gap ≤ 0.0225`, i.e. just `gap=0.0` of the 6 swept gaps. The plot script (`plot_ab_regime.py:472-478`) misinterprets the resulting honest-input acceptance as "Theorem 13 is loose".
 - **gate_noise** (M1): the paper has zero predictions about per-gate depolarizing noise. The "threshold" the experiment measures is dominated by exponential truth-table oracle synthesis cost in `_circuit_oracle_f`, not protocol robustness.
 

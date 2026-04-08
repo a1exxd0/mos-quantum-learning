@@ -53,11 +53,18 @@ def run_theta_sensitivity_experiment(
          :meth:`ql.prover.MoSProver.run_protocol` (lines 316-321) and
          :func:`ql.verifier.MoSVerifier._verify_core` (lines 487-497).
          For :math:`\vartheta = 0.05` the analytic prover budget is
-         :math:`\sim 1.5 \times 10^8` shots vs 2000 used (5 orders
-         short); the verifier budget is :math:`\sim 5 \times 10^6` vs
-         3000.  The experiment maps where the verifier accepts/rejects;
-         it does NOT empirically test the theoretical
-         :math:`1/\vartheta^4` scaling.
+         :math:`\sim 1.9 \times 10^8` shots vs 2000 used (about 5 orders
+         short).  The analytic verifier budget at the same
+         :math:`\vartheta` ranges from :math:`\sim 2.3 \times 10^5`
+         (:math:`|L|=1`) to :math:`\sim 1 \times 10^8` (the empirical
+         median :math:`|L| \approx 484` at :math:`n=16`) to
+         :math:`\sim 1.5 \times 10^{14}` (the worst-case enforced
+         Theorem 12 list bound :math:`64 b^2/\vartheta^2 = 13312`),
+         versus 3000 used --- between 2 and 11 orders of magnitude
+         short depending on which :math:`|L|` you plug in.  The
+         experiment maps where the verifier accepts/rejects; it does
+         NOT empirically test the theoretical :math:`1/\vartheta^4`
+         scaling.
 
        - **M2.** :func:`make_sparse_plus_noise` has nonzero Fourier
          coefficients of magnitude exactly 0.1, so for any

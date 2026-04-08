@@ -115,11 +115,13 @@ After applying the M1 fix in `experiments/harness/average_case.py` (plumb `Trial
 
 ### Verified outcomes (`results/figures/average_case/cross_family_summary.csv`)
 
-| Family | Old (wrong dispatch) accept range | **New (Theorem 15)** accept range |
+| Family | Old (wrong dispatch) accept range | **New (Theorem 15)** accept range (n=4 → n=9 → n=16) |
 |---|---|---|
-| k_sparse (k=2) | 0.76 → 0.78 → 0.76 | **0.39 → 0.47 → 0.56** |
-| k_sparse (k=4) | 0.81 → 0.63 → 0.74 | **0.32 → 0.42 → 0.70** |
-| sparse_plus_noise | 0.78 → 0.13 → 0.15 | **0.04 → 0.07 → 0.54** (collapses with n) |
+| k_sparse (k=2) | 0.76 → 0.78 → 0.76 | **0.53 → 0.47 → 0.38** |
+| k_sparse (k=4) | 0.81 → 0.63 → 0.74 | **0.57 → 0.47 → 0.32** |
+| sparse_plus_noise | 0.78 → 0.13 → 0.15 | **0.54 → 0.05 → 0.04** (collapses with n) |
+
+Numbers read directly from the regenerated `.pb` (`/tmp/average_case.json` after `uv run python -m experiments.decode`); each row is monotonically *decreasing* with n, not increasing — a previous version of this table had the n=16 endpoints transposed with the n=4 endpoints for k_sparse_4 and sparse_plus_noise.
 
 All 2521 / 3900 rejections (≈ 65%) carry outcome `reject_insufficient_weight`; **zero rejects are `reject_list_too_large`** — the prover IS finding the heavy coefficients, the verifier's per-coefficient Hoeffding tolerance under the still-hardcoded `classical_samples_verifier = 3000` is what blocks them. Misclassification rate is now populated for every accepted trial (1379 of 3900): mean / median per family
 
