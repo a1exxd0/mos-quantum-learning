@@ -181,20 +181,6 @@ class ExperimentResult:
                 ),
                 trials=trial_pbs,
             )
-        elif self.experiment_name == "verifier_truncation":
-            return truncation_pb2.TruncationExperimentResult(
-                metadata=metadata,
-                parameters=truncation_pb2.TruncationParameters(
-                    n=params["n"],
-                    noise_rate=params["noise_rate"],
-                    a_sq=params["a_sq"],
-                    epsilon_range=params["epsilon_range"],
-                    verifier_sample_range=params["verifier_sample_range"],
-                    num_trials=params["num_trials"],
-                    qfs_shots=params["qfs_shots"],
-                ),
-                trials=trial_pbs,
-            )
         elif self.experiment_name == "noise_sweep":
             return noise_sweep_pb2.NoiseSweepExperimentResult(
                 metadata=metadata,
